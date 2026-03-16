@@ -771,7 +771,7 @@ function ValidationPage({ vm }) {
     <div className="stack-page">
       <div className="page-grid two-col">
         <Card>
-          <SectionHeader title="验证模式分布" subtitle="系统有没有认真做模拟与回放" />
+          <SectionHeader title="最近运行模式统计" subtitle="最近几次记录里，实盘 / 模拟 / 回放各有多少次" />
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={vm.auditModes}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
