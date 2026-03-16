@@ -225,6 +225,15 @@ function fmtTime(value) {
   return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
 
+function fmtClock(value) {
+  if (!value) return '未知时间'
+  return new Date(value).toLocaleTimeString('zh-CN', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function fmtAgo(freshness) {
   if (!freshness) return '未知'
   if (freshness.minutes < 1) return `${freshness.seconds}s 前`
@@ -492,9 +501,10 @@ function useViewModel(localData, liveData) {
       value,
     }))
     const assetTrend = (localData?.history?.audits || []).slice().reverse().map((item) => ({
-      name: item.runId?.slice(-4) || item.fileName,
+      name: fmtClock(item.updatedAt || item.createdAt),
       totalValue: item.totalValue || 0,
       returnRate: (item.returnRate || 0) * 100,
+      modeLabel: mapLabel('mode', item.mode, item.mode),
     }))
     const liveSummary = liveData?.summary || {}
     return {
