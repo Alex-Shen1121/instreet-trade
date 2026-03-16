@@ -15,6 +15,8 @@ const paths = {
   candidateState: path.join(WORKSPACE, '.instreet_candidate_state.json'),
   switchGate: path.join(WORKSPACE, '.instreet_switch_gate.json'),
   acceptanceState: path.join(WORKSPACE, '.instreet_acceptance_state.json'),
+  sellState: path.join(WORKSPACE, '.instreet_sell_state.json'),
+  postRetryQueue: path.join(WORKSPACE, '.instreet_post_retry_queue.json'),
   switchEvaluations: path.join(WORKSPACE, '.instreet_switch_evaluations.json'),
   arena: path.join(WORKSPACE, '.instreet_arena.json'),
   manifest: path.join(STRATEGY_ROOT, 'strategy_manifest.json'),
@@ -32,6 +34,8 @@ const ALLOWED_MANIFEST_KEYS = new Set([
   'execution_hygiene',
   'strategy_state_machine',
   'review_policy',
+  'candidate_pool',
+  'sell_state_machine',
 ]);
 
 const ALLOWED_PROFILE_KEYS = new Set([
@@ -155,6 +159,8 @@ function buildCompletedFeatures() {
     { key: 'focus', title: '动态重点关注层', desc: '输出重点板块、股票、回避方向和风格判断', status: 'done' },
     { key: 'signal', title: '策略切换状态机', desc: '支持 observe_switch / switch_ready / rollback_watch', status: 'done' },
     { key: 'validation', title: 'dry-run / replay 验证', desc: '支持只跑决策链和基于审计快照重放', status: 'done' },
+    { key: 'candidate-discovery', title: '动态候选发现池', desc: '在固定白名单外，结合榜单、交易和新闻补充事件池候选', status: 'done' },
+    { key: 'sell-state', title: '卖出状态机', desc: '卖出不再只看单次阈值，支持连续信号确认与恢复', status: 'done' },
     { key: 'audit', title: '审计快照', desc: '每轮保存 inputs / outputs / llm prompt-response', status: 'done' },
     { key: 'logs', title: '独立日志切分', desc: '每次运行单独日志文件，不再混写到一个文件', status: 'done' },
     { key: 'feishu', title: '飞书知识库同步', desc: '交易日志按 日期/时间 落档，并维护持仓规划总览', status: 'done' },
@@ -207,6 +213,11 @@ function buildConfigMeta() {
       buy_cooldown_minutes: '买入冷静期：同一标的刚买完后，多长时间内不再重复追买。',
       sell_observe_minutes: '卖出观察期：刚卖出后，多长时间内禁止重新追入，避免来回反手。',
       layer_weights: '候选池分层权重：核心池/观察池/事件池在候选打分时的额外加权。',
+      leader_discovery_weight: '榜单发现权重：排行榜持仓命中事件池候选时的附加权重。',
+      recent_trade_discovery_weight: '近期交易发现权重：排行榜近期交易命中事件池候选时的附加权重。',
+      news_discovery_weight: '新闻发现权重：新闻标题命中事件池候选时的附加权重。',
+      confirm_runs_trim: '减仓确认轮数：连续多少轮触发后，系统才正式执行减仓。',
+      confirm_runs_exit: '清仓确认轮数：连续多少轮触发后，系统才正式执行清仓。',
       bucket_targets: '目标仓位：系统希望长期维持的 bucket 理想占比。',
       bucket_minimums: '最低配置：某些关键 bucket 至少应保留的底仓比例。',
     },
@@ -283,6 +294,8 @@ export function getDashboardData() {
   const candidateState = readJson(paths.candidateState, {});
   const switchEvaluations = readJson(paths.switchEvaluations, []);
   const acceptanceState = readJson(paths.acceptanceState, {});
+  const sellState = readJson(paths.sellState, {});
+  const postRetryQueue = readJson(paths.postRetryQueue, {});
   const auditFiles = listFiles(paths.auditDir, '.json');
   const logFiles = listFiles(paths.logDir, '.log');
   const latestAudit = getLatestAudit(state, auditFiles);
@@ -343,6 +356,8 @@ export function getDashboardData() {
       focusMemory,
       candidateState,
       acceptanceState,
+      sellState,
+      postRetryQueue,
       audit: latestAudit,
       news: latestNews,
       latestLogPreview,
@@ -351,8 +366,13 @@ export function getDashboardData() {
         bucketTargets: baseBundle?.bucket_targets || {},
         correlationExposures: baseBundle?.correlation_exposures || {},
         singlePositionExposures: baseBundle?.single_position_exposures || {},
+        pendingContext: baseBundle?.pending_context || {},
+        candidateUniverse: baseBundle?.candidate_universe || [],
+        scoredCandidates: baseBundle?.candidates_scored || [],
         exitCandidates: baseBundle?.exit_candidates || [],
         buySkipReasons: baseBundle?.buy_skip_reasons || [],
+        sellState: baseBundle?.sell_state || sellState || {},
+        regimeFeatures: dynamicFocus?.regime_features || latestAuditOutputs?.dynamic_focus?.regime_features || {},
         rebalanceNeeded: baseBundle?.rebalance_needed || false,
       },
     },
