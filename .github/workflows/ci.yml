@@ -61,6 +61,11 @@ jobs:
           curl -fsS http://127.0.0.1:33210/api/overview >/tmp/overview.json
           node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync('/tmp/overview.json','utf8')); if(!data.summary || !data.latestRun){throw new Error('overview payload missing expected fields')} console.log('overview ok')"
 
+      - name: Run API contract tests
+        env:
+          CONTRACT_BASE_URL: http://127.0.0.1:33210
+        run: npm run test:contract
+
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 

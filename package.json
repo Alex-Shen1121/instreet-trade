@@ -11,7 +11,8 @@
     "start": "NODE_ENV=production PORT=3210 node server/index.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:contract": "node --test tests/contracts/*.test.mjs"
   },
   "dependencies": {
     "express": "^5.2.1",
