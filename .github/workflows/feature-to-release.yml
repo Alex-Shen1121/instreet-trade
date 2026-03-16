@@ -68,7 +68,7 @@ jobs:
             fi
 
             if [ "$TOTAL" != "0" ] && [ "$PENDING" = "0" ]; then
-              gh pr merge "$PR_NUMBER" --repo "$REPO" --merge --delete-branch=false
+              gh pr merge "$PR_NUMBER" --repo "$REPO" --rebase --delete-branch=false
               exit 0
             fi
 
