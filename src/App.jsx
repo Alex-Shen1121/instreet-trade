@@ -786,7 +786,7 @@ function ValidationPage({ vm }) {
           </div>
         </Card>
         <Card>
-          <SectionHeader title="审计样本资产轨迹" subtitle="按最近审计样本看资产变化" />
+          <SectionHeader title="最近审计记录里的总资产变化" subtitle="横轴是审计时间，纵轴是当时总资产；这不是实时收益曲线" />
           <ResponsiveContainer width="100%" height={280}>
             <AreaChart data={vm.assetTrend}>
               <defs>
