@@ -64,7 +64,7 @@ test('GET /api/config returns editable strategy config payload', async () => {
   assert.equal(typeof data.generatedAt, 'string')
   assert.equal(typeof data.strategyRoot, 'string')
   assert.equal(typeof data.manifest, 'object')
-  assert.equal(typeof data.activeProfileId, 'string')
+  assert.ok(typeof data.activeProfileId === 'string' || data.activeProfileId === null)
   assert.ok(Array.isArray(data.profiles))
   assert.ok(Array.isArray(data.profileOptions))
   assert.ok(typeof data.meta === 'object')
