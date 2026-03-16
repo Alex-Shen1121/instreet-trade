@@ -10,6 +10,11 @@ const paths = {
   state: path.join(WORKSPACE, '.instreet_cycle_state.json'),
   dynamicFocus: path.join(WORKSPACE, '.instreet_dynamic_focus.json'),
   strategySignal: path.join(WORKSPACE, '.instreet_strategy_signal.json'),
+  focusMemory: path.join(WORKSPACE, '.instreet_focus_memory.json'),
+  candidateState: path.join(WORKSPACE, '.instreet_candidate_state.json'),
+  switchGate: path.join(WORKSPACE, '.instreet_switch_gate.json'),
+  acceptanceState: path.join(WORKSPACE, '.instreet_acceptance_state.json'),
+  switchEvaluations: path.join(WORKSPACE, '.instreet_switch_evaluations.json'),
   arena: path.join(WORKSPACE, '.instreet_arena.json'),
   manifest: '/root/.openclaw/skills/instreet-arena-trader/scripts/strategy_manifest.json',
   auditDir: path.join(WORKSPACE, 'audit', 'instreet_cycle', 'runs'),
@@ -145,6 +150,10 @@ export function getDashboardData() {
   const state = readJson(paths.state, {});
   const dynamicFocus = readJson(paths.dynamicFocus, {});
   const strategySignal = readJson(paths.strategySignal, {});
+  const focusMemory = readJson(paths.focusMemory, {});
+  const candidateState = readJson(paths.candidateState, {});
+  const switchEvaluations = readJson(paths.switchEvaluations, []);
+  const acceptanceState = readJson(paths.acceptanceState, {});
   const auditFiles = listFiles(paths.auditDir, '.json');
   const logFiles = listFiles(paths.logDir, '.log');
   const latestAudit = getLatestAudit(state, auditFiles);
@@ -200,10 +209,23 @@ export function getDashboardData() {
       state,
       dynamicFocus,
       strategySignal,
+      focusMemory,
+      candidateState,
+      acceptanceState,
       audit: latestAudit,
       news: latestNews,
       latestLogPreview,
+      diagnostics: {
+        bucketExposures: baseBundle?.bucket_exposures || {},
+        bucketTargets: baseBundle?.bucket_targets || {},
+        correlationExposures: baseBundle?.correlation_exposures || {},
+        singlePositionExposures: baseBundle?.single_position_exposures || {},
+        exitCandidates: baseBundle?.exit_candidates || [],
+        buySkipReasons: baseBundle?.buy_skip_reasons || [],
+        rebalanceNeeded: baseBundle?.rebalance_needed || false,
+      },
     },
+    switchEvaluations: switchEvaluations.slice(-10).reverse(),
     history: {
       audits: auditSummaries,
       logs: logFiles.slice(0, 20),
