@@ -797,8 +797,8 @@ function ValidationPage({ vm }) {
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip formatter={(value) => fmtMoney(value)} />
+              <YAxis tickFormatter={(value) => `${(Number(value) / 10000).toFixed(0)}万`} />
+              <Tooltip formatter={(value) => fmtMoney(value)} labelFormatter={(label) => `审计时间 ${label}`} />
               <Area type="monotone" dataKey="totalValue" stroke="#2563eb" fill="url(#assetFill)" strokeWidth={3} />
             </AreaChart>
           </ResponsiveContainer>
