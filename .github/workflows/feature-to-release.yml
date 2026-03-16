@@ -55,9 +55,9 @@ jobs:
               exit 0
             fi
 
-            TOTAL=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup | length')
-            PENDING=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.status != "COMPLETED")] | length')
-            FAILED=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.status == "COMPLETED" and .conclusion != null and .conclusion != "SUCCESS" and .conclusion != "SKIPPED" and .conclusion != "NEUTRAL")] | length')
+            TOTAL=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name != "promote-feature-to-release")] | length')
+            PENDING=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name != "promote-feature-to-release" and .status != "COMPLETED")] | length')
+            FAILED=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name != "promote-feature-to-release" and .status == "COMPLETED" and .conclusion != null and .conclusion != "SUCCESS" and .conclusion != "SKIPPED" and .conclusion != "NEUTRAL")] | length')
 
             echo "PR #$PR_NUMBER checks => total:$TOTAL pending:$PENDING failed:$FAILED"
 
