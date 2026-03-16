@@ -1,0 +1,22 @@
+name: Release Source Guard
+
+on:
+  pull_request:
+    branches:
+      - release
+
+jobs:
+  guard-release-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure only feature branches can target release
+        run: |
+          case "${{ github.head_ref }}" in
+            feature/*)
+              echo "PR source is valid: ${{ github.head_ref }} -> release"
+              ;;
+            *)
+              echo "Only feature/* branches may open PRs to release. Current head: ${{ github.head_ref }}"
+              exit 1
+              ;;
+          esac
