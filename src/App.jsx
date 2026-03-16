@@ -55,9 +55,32 @@ const LABELS = {
   },
   bucket: {
     energy_dividend: '能源红利',
+    coal_dividend: '煤炭红利',
+    power_dividend: '电力红利',
+    hydro_dividend: '水电红利',
+    bank_dividend: '银行红利',
+    telecom_dividend: '通信红利',
+    finance: '金融',
     insurance: '保险金融',
-    technology_manufacturing: '科技制造',
+    tech_manufacturing: '科技制造',
+    consumer_electronics: '消费电子',
+    electronics: '电子',
+    ict_equipment: '通信设备',
+    digital_security: '数字安防',
+    new_energy: '新能源',
+    new_energy_auto: '新能源车',
+    energy_growth: '能源成长',
+    infra_power: '基建电力',
     other: '其他',
+  },
+  layer: {
+    core: '核心池',
+    watch: '观察池',
+    event: '事件池',
+  },
+  preferred: {
+    true: '是',
+    false: '否',
   },
 }
 
@@ -983,6 +1006,92 @@ function ObjectNumberCard({ title, subtitle, source, helpMap = {}, onSave, savin
   )
 }
 
+function WatchlistCard({ title, subtitle, source, onSave, saving }) {
+  const [draft, setDraft] = useState([])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(source || [])
+  }, [source])
+
+  const bucketOptions = [
+    'energy_dividend', 'coal_dividend', 'power_dividend', 'hydro_dividend',
+    'bank_dividend', 'telecom_dividend', 'finance', 'insurance',
+    'tech_manufacturing', 'consumer_electronics', 'electronics', 'ict_equipment',
+    'digital_security', 'new_energy', 'new_energy_auto', 'energy_growth',
+    'infra_power', 'other',
+  ]
+  const layerOptions = ['core', 'watch', 'event']
+
+  function updateRow(index, field, value) {
+    setDraft((prev) => {
+      const next = prev.slice()
+      next[index] = { ...next[index], [field]: value }
+      return next
+    })
+  }
+
+  function addRow() {
+    setDraft((prev) => [
+      ...prev,
+      { symbol: '', name: '', bucket: 'other', preferred: false, layer: 'watch' },
+    ])
+  }
+
+  function deleteRow(index) {
+    setDraft((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  async function handleSave() {
+    await onSave(draft)
+  }
+
+  return (
+    <Card>
+      {title ? <SectionHeader title={title} subtitle={subtitle} /> : null}
+      <div className="watchlist-table">
+        <div className="watchlist-header">
+          <span>Symbol</span>
+          <span>名称</span>
+          <span>分类 Bucket</span>
+          <span>偏好</span>
+          <span>层级</span>
+          <span>操作</span>
+        </div>
+        {draft.map((row, idx) => (
+          <div key={idx} className="watchlist-row">
+            <input
+              type="text"
+              value={row.symbol || ''}
+              onChange={(e) => updateRow(idx, 'symbol', e.target.value)}
+              placeholder="sh600000"
+            />
+            <input
+              type="text"
+              value={row.name || ''}
+              onChange={(e) => updateRow(idx, 'name', e.target.value)}
+              placeholder="股票名称"
+            />
+            <select value={row.bucket || 'other'} onChange={(e) => updateRow(idx, 'bucket', e.target.value)}>
+              {bucketOptions.map((b) => <option key={b} value={b}>{mapLabel('bucket', b, b)}</option>)}
+            </select>
+            <select value={String(row.preferred)} onChange={(e) => updateRow(idx, 'preferred', e.target.value === 'true')}>
+              <option value="true">是</option>
+              <option value="false">否</option>
+            </select>
+            <select value={row.layer || 'watch'} onChange={(e) => updateRow(idx, 'layer', e.target.value)}>
+              {layerOptions.map((l) => <option key={l} value={l}>{mapLabel('layer', l, l)}</option>)}
+            </select>
+            <button className="delete-button" onClick={() => deleteRow(idx)} title="删除此行">×</button>
+          </div>
+        ))}
+        <button className="add-row-button" onClick={addRow}>+ 添加一行</button>
+      </div>
+      <button className="save-button" onClick={handleSave} disabled={saving}>{saving ? '保存中…' : '保存 Watchlist'}</button>
+    </Card>
+  )
+}
+
 function ConfigPage({ configData, configLoading, configError, saveMessage, saving, onRefresh, onUpdateManifest, onUpdateProfile, onUpdateActiveProfile }) {
   if (configLoading && !configData) return <div className="screen-state">正在加载策略配置…</div>
   if (!configData) return <div className="screen-state error-state">配置加载失败：{configError || '未知错误'}</div>
@@ -1088,6 +1197,18 @@ function ConfigPage({ configData, configLoading, configError, saveMessage, savin
               onSave={(patch) => onUpdateProfile(activeProfile.profile_id, { bucket_minimums: patch })}
             />
           </div>
+
+          <Card>
+            <SectionHeader
+              title="固定股票池 (Watchlist)"
+              subtitle="该策略的固定关注股票列表，包含 symbol、名称、分类、是否偏好、所在层级。"
+            />
+            <WatchlistCard
+              source={activeProfile.watchlist || []}
+              saving={saving}
+              onSave={(patch) => onUpdateProfile(activeProfile.profile_id, { watchlist: patch })}
+            />
+          </Card>
         </>
       ) : null}
     </div>

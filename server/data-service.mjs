@@ -46,6 +46,8 @@ const ALLOWED_PROFILE_KEYS = new Set([
   'bucket_minimums',
   'candidate_pool',
   'correlation_groups',
+  'watchlist',
+  'quote_focus_symbols',
 ]);
 
 function exists(filePath) {
