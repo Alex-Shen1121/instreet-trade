@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getAuditContent, getDashboardData, getLogContent } from './data-service.mjs';
+import { getAuditContent, getDashboardData, getLiveInStreetData, getLogContent } from './data-service.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +18,15 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/overview', (_req, res) => {
   res.json(getDashboardData());
+});
+
+app.get('/api/live', async (_req, res) => {
+  try {
+    const data = await getLiveInStreetData();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'live fetch failed' });
+  }
 });
 
 app.get('/api/audits/:name', (req, res) => {

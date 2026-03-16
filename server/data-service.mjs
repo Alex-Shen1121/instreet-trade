@@ -10,6 +10,8 @@ const paths = {
   state: path.join(WORKSPACE, '.instreet_cycle_state.json'),
   dynamicFocus: path.join(WORKSPACE, '.instreet_dynamic_focus.json'),
   strategySignal: path.join(WORKSPACE, '.instreet_strategy_signal.json'),
+  arena: path.join(WORKSPACE, '.instreet_arena.json'),
+  manifest: '/root/.openclaw/skills/instreet-arena-trader/scripts/strategy_manifest.json',
   auditDir: path.join(WORKSPACE, 'audit', 'instreet_cycle', 'runs'),
   logDir: path.join(WORKSPACE, 'logs', 'instreet_cycle'),
 };
@@ -59,16 +61,6 @@ function listFiles(dir, suffix = '') {
   }
 }
 
-function formatPercent(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
-  return `${(Number(value) * 100).toFixed(2)}%`;
-}
-
-function formatMoney(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
-  return Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
 function tailLines(filePath, limit = 160) {
   const text = readText(filePath, '');
   if (!text) return '';
@@ -115,7 +107,38 @@ function buildCompletedFeatures() {
     { key: 'logs', title: '独立日志切分', desc: '每次运行单独日志文件，不再混写到一个文件', status: 'done' },
     { key: 'feishu', title: '飞书知识库同步', desc: '交易日志按 日期/时间 落档，并维护持仓规划总览', status: 'done' },
     { key: 'cron', title: 'Cron 自动执行', desc: '交易时段按计划自动巡检和同步', status: 'done' },
+    { key: 'dashboard', title: 'Dashboard 混合模式', desc: '页面同时展示本地审计快照与实时 InStreet 拉取结果', status: 'done' },
   ];
+}
+
+function summarizeTrades(trades = []) {
+  const pending = trades.filter((item) => item.status === 'pending').length;
+  const executed = trades.filter((item) => item.status === 'executed').length;
+  return { pending, executed, total: trades.length };
+}
+
+function buildFreshness(lastRunAt) {
+  if (!lastRunAt) return null;
+  const diffMs = Date.now() - new Date(lastRunAt).getTime();
+  return {
+    seconds: Math.floor(diffMs / 1000),
+    minutes: Math.floor(diffMs / 60000),
+  };
+}
+
+function mapLiveSummary(live) {
+  const portfolio = live?.portfolio?.data?.portfolio || {};
+  const holdings = live?.portfolio?.data?.holdings || [];
+  const trades = live?.trades?.data?.trades || [];
+  const leaderboard = live?.leaderboard?.data?.leaderboard || [];
+  return {
+    pulledAt: live?.pulledAt || null,
+    portfolio,
+    holdings,
+    trades,
+    leaderboard: leaderboard.slice(0, 5),
+    tradeSummary: summarizeTrades(trades),
+  };
 }
 
 export function getDashboardData() {
@@ -132,6 +155,7 @@ export function getDashboardData() {
   const holdings = latestAudit?.inputs?.portfolio_data?.data?.holdings || [];
   const latestNews = latestAudit?.inputs?.filtered_market_news || [];
   const baseBundle = latestAuditOutputs?.base_bundle || {};
+  const latestTrades = latestAudit?.inputs?.trades_data?.data?.trades || [];
 
   const auditSummaries = auditFiles.slice(0, 20).map(normalizeAuditSummary);
   const validationModes = auditSummaries.reduce((acc, item) => {
@@ -162,12 +186,15 @@ export function getDashboardData() {
       cash: portfolio?.cash ?? null,
       holdingsValue: portfolio?.holdings_value ?? null,
       returnRate: portfolio?.return_rate ?? null,
+      freshness: buildFreshness(state?.last_run_at),
+      pendingTrades: summarizeTrades(latestTrades).pending,
     },
     portfolio: {
       portfolio,
       holdings,
       bucketExposures: baseBundle?.bucket_exposures || {},
       riskControls: baseBundle?.risk_controls || {},
+      trades: latestTrades,
     },
     latestRun: {
       state,
@@ -188,10 +215,48 @@ export function getDashboardData() {
       },
     },
     completedFeatures: buildCompletedFeatures(),
-    helpers: {
-      formatPercent,
-      formatMoney,
-    },
+  };
+}
+
+export async function getLiveInStreetData() {
+  const arena = readJson(paths.arena, {});
+  const manifest = readJson(paths.manifest, {});
+  const apiKey = arena?.api_key;
+  const baseUrl = arena?.base_url || manifest?.base_url;
+
+  if (!apiKey || !baseUrl) {
+    throw new Error('missing InStreet credentials or base URL');
+  }
+
+  async function apiRequest(requestPath) {
+    const response = await fetch(`${baseUrl}${requestPath}`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'User-Agent': 'instreet-trade-dashboard/1.0',
+      },
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 240)}`);
+    }
+    return response.json();
+  }
+
+  const [portfolio, trades, leaderboard, home] = await Promise.all([
+    apiRequest('/api/v1/arena/portfolio'),
+    apiRequest('/api/v1/arena/trades?limit=20'),
+    apiRequest('/api/v1/arena/leaderboard?limit=10'),
+    apiRequest('/api/v1/home'),
+  ]);
+
+  return {
+    source: 'instreet-live',
+    pulledAt: new Date().toISOString(),
+    portfolio,
+    trades,
+    leaderboard,
+    home,
+    summary: mapLiveSummary({ pulledAt: new Date().toISOString(), portfolio, trades, leaderboard }),
   };
 }
 
