@@ -331,6 +331,22 @@ function castValue(raw, type) {
   return raw
 }
 
+async function readApiResponse(res) {
+  const text = await res.text()
+  const contentType = res.headers.get('content-type') || ''
+  const isJson = contentType.includes('application/json')
+
+  if (isJson) {
+    const json = text ? JSON.parse(text) : null
+    if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+    return json
+  }
+
+  const snippet = text.replace(/\s+/g, ' ').slice(0, 160)
+  if (!res.ok) throw new Error(`HTTP ${res.status}${snippet ? `: ${snippet}` : ''}`)
+  throw new Error(`接口没有返回 JSON，实际返回了 ${contentType || '未知类型'}：${snippet || 'empty response'}`)
+}
+
 function useDashboardData() {
   const [localData, setLocalData] = useState(null)
   const [liveData, setLiveData] = useState(null)
@@ -347,8 +363,7 @@ function useDashboardData() {
   async function loadLocal() {
     try {
       const res = await fetch('/api/overview')
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const json = await res.json()
+      const json = await readApiResponse(res)
       setLocalData(json)
       setError('')
     } catch (err) {
@@ -362,8 +377,7 @@ function useDashboardData() {
     try {
       setConfigLoading(true)
       const res = await fetch('/api/config')
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+      const json = await readApiResponse(res)
       setConfigData(json)
       setConfigError('')
     } catch (err) {
@@ -385,8 +399,7 @@ function useDashboardData() {
     try {
       setLiveLoading(true)
       const res = await fetch('/api/live')
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+      const json = await readApiResponse(res)
       setLiveData(json)
       setLiveError('')
     } catch (err) {
@@ -411,8 +424,7 @@ function useDashboardData() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+      const json = await readApiResponse(res)
       setConfigData(json)
       setConfigError('')
       setSaveMessage(successText)
