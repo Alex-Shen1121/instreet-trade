@@ -13,11 +13,6 @@ jobs:
   promote-feature-to-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Create or update PR from feature to release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,7 +70,9 @@ jobs:
             fi
 
             if [ "$TOTAL" != "0" ] && [ "$PENDING" = "0" ]; then
-              gh pr merge "$PR_NUMBER" --repo "$REPO" --rebase --delete-branch=false
+              gh pr merge "$PR_NUMBER" --repo "$REPO" --rebase --delete-branch=false || \
+              gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch=false || \
+              gh pr merge "$PR_NUMBER" --repo "$REPO" --merge --delete-branch=false || { echo "All merge strategies failed"; exit 1; }
               exit 0
             fi
 
