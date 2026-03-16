@@ -556,8 +556,9 @@ function Layout({ vm, liveLoading, liveError, refreshLive, children }) {
         </nav>
 
         <div className="sidebar-card">
-          <div className="sidebar-title">当前策略</div>
-          <strong>{mapLabel('profile', vm.summary.activeProfile, vm.summary.activeProfile)}</strong>
+          <div className="sidebar-title">策略状态</div>
+          <strong>下次运行将使用：{mapLabel('profile', vm.summary.configuredProfile, vm.summary.configuredProfile)}</strong>
+          <div className="sidebar-meta">上次运行实际使用：{mapLabel('profile', vm.summary.lastRunProfile, vm.summary.lastRunProfile || '无')}</div>
           <div className="sidebar-meta">状态：{mapLabel('strategyState', vm.summary.strategyState, vm.summary.strategyState)}</div>
           <div className="sidebar-meta">建议切换：{mapLabel('profile', vm.summary.suggestedProfile, vm.summary.suggestedProfile || '无')}</div>
         </div>
@@ -626,7 +627,8 @@ function OverviewPage({ vm, liveError }) {
         <Card>
           <SectionHeader title="今日概况" subtitle="先看结论，再看细节" extra={<Badge tone={toneForAction(vm.summary.latestAction)}>{mapLabel('action', vm.summary.latestAction)}</Badge>} />
           <div className="kv-list compact">
-            <div><span>当前策略</span><strong>{mapLabel('profile', vm.summary.activeProfile, vm.summary.activeProfile)}</strong></div>
+            <div><span>下次运行将使用</span><strong>{mapLabel('profile', vm.summary.configuredProfile, vm.summary.configuredProfile)}</strong></div>
+            <div><span>上次运行实际使用</span><strong>{mapLabel('profile', vm.summary.lastRunProfile, vm.summary.lastRunProfile || '无')}</strong></div>
             <div><span>市场结构</span><strong>{mapLabel('regime', vm.summary.marketRegime, vm.summary.marketRegime)}</strong></div>
             <div><span>策略状态</span><strong>{mapLabel('strategyState', vm.summary.strategyState, vm.summary.strategyState)}</strong></div>
             <div><span>运行模式</span><strong>{mapLabel('mode', vm.summary.lastMode, vm.summary.lastMode)}</strong></div>
@@ -676,7 +678,8 @@ function StrategyPage({ vm }) {
         <p className="banner-reason">{vm.summary.latestReason}</p>
         <div className="mini-grid top-space">
           <div className="mini-card"><div className="mini-label">市场结构</div><strong>{mapLabel('regime', vm.summary.marketRegime, vm.summary.marketRegime)}</strong></div>
-          <div className="mini-card"><div className="mini-label">当前策略</div><strong>{mapLabel('profile', vm.summary.activeProfile, vm.summary.activeProfile)}</strong></div>
+          <div className="mini-card"><div className="mini-label">下次运行将使用</div><strong>{mapLabel('profile', vm.summary.configuredProfile, vm.summary.configuredProfile)}</strong></div>
+          <div className="mini-card"><div className="mini-label">上次运行实际使用</div><strong>{mapLabel('profile', vm.summary.lastRunProfile, vm.summary.lastRunProfile || '无')}</strong></div>
           <div className="mini-card"><div className="mini-label">建议切换</div><strong>{mapLabel('profile', vm.signal.last_suggested_profile, vm.signal.last_suggested_profile || '无')}</strong></div>
           <div className="mini-card"><div className="mini-label">连续信号</div><strong>{vm.signal.consecutive_same_suggestion || 0} / {vm.signal.switch_signal_threshold || 0}</strong></div>
         </div>
@@ -999,7 +1002,7 @@ function ConfigPage({ configData, configLoading, configError, saveMessage, savin
         </div>
         <div className="hero-status-grid">
           <div className="hero-status-card bright">
-            <span>当前量化大策略</span>
+            <span>下次运行将使用</span>
             <strong>{mapLabel('profile', configData.activeProfileId, activeProfile?.label || configData.activeProfileId)}</strong>
             <small>{activeProfile?.thesis || '暂无策略说明'}</small>
           </div>
