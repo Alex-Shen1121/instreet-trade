@@ -36,7 +36,7 @@ jobs:
           fi
           echo "Using PR #$PR_NUMBER"
 
-      - name: Wait for PR checks and merge to release
+      - name: Enable auto-merge to release
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -48,33 +48,11 @@ jobs:
             exit 0
           fi
 
-          for i in $(seq 1 30); do
-            STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state')
-            if [ "$STATE" != "OPEN" ]; then
-              echo "PR #$PR_NUMBER is already $STATE"
-              exit 0
-            fi
+          STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state')
+          if [ "$STATE" != "OPEN" ]; then
+            echo "PR #$PR_NUMBER is already $STATE"
+            exit 0
+          fi
 
-            TOTAL=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name != "promote-feature-to-release")] | length')
-            PENDING=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name != "promote-feature-to-release" and .status != "COMPLETED")] | length')
-            FAILED=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name != "promote-feature-to-release" and .status == "COMPLETED" and .conclusion != null and .conclusion != "SUCCESS" and .conclusion != "SKIPPED" and .conclusion != "NEUTRAL")] | length')
-
-            echo "PR #$PR_NUMBER checks => total:$TOTAL pending:$PENDING failed:$FAILED"
-
-            if [ "$FAILED" != "0" ]; then
-              echo "PR #$PR_NUMBER has failing checks"
-              gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup
-              exit 1
-            fi
-
-            if [ "$TOTAL" != "0" ] && [ "$PENDING" = "0" ]; then
-              gh pr merge "$PR_NUMBER" --repo "$REPO" --rebase --delete-branch=false
-              exit 0
-            fi
-
-            sleep 10
-          done
-
-          echo "Timed out waiting for PR #$PR_NUMBER checks to finish"
-          gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup
-          exit 1
+          echo "Enable auto-merge for PR #$PR_NUMBER"
+          gh pr merge "$PR_NUMBER" --repo "$REPO" --auto --rebase --delete-branch=false
