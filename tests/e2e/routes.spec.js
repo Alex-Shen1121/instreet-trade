@@ -5,7 +5,7 @@ const routes = [
   { path: '/overview', text: '今日概况' },
   { path: '/strategy', text: '策略大脑' },
   { path: '/portfolio', text: '策略快照持仓' },
-  { path: '/validation', text: '验证模式分布' },
+  { path: '/validation', text: '最近运行模式统计' },
   { path: '/history', text: '最近审计记录' },
   { path: '/config', text: '量化大策略切换' },
 ]
