@@ -274,6 +274,7 @@ export function updateProfileConfig(profileId, patch = {}) {
 
 export function getDashboardData() {
   const state = readJson(paths.state, {});
+  const manifest = readJson(paths.manifest, {});
   const dynamicFocus = readJson(paths.dynamicFocus, {});
   const strategySignal = readJson(paths.strategySignal, {});
   const focusMemory = readJson(paths.focusMemory, {});
@@ -312,6 +313,8 @@ export function getDashboardData() {
       lastRunAt: state?.last_run_at || null,
       lastMode: state?.last_mode || null,
       activeProfile: state?.active_profile || null,
+      configuredProfile: manifest?.active_profile || state?.active_profile || null,
+      lastRunProfile: state?.active_profile || null,
       latestAction: latestAuditOutputs?.decision?.action || state?.last_decision?.action || 'unknown',
       latestReason: latestAuditOutputs?.decision?.reason || state?.last_decision?.reason || '',
       marketRegime: dynamicFocus?.market_regime || latestAuditOutputs?.dynamic_focus?.market_regime || 'unknown',
