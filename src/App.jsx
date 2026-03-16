@@ -42,6 +42,13 @@ const LABELS = {
     rollback_watch: '切换后回看期',
     switched: '已完成切换',
   },
+  sellState: {
+    idle: '空闲',
+    observe_exit: '观察卖出信号',
+    ready_to_trim: '已满足减仓条件',
+    ready_to_exit: '已满足清仓条件',
+    recovering: '恢复观察中',
+  },
   regime: {
     risk_off: '偏防守市场',
     balanced: '均衡市场',
@@ -169,6 +176,29 @@ const MANIFEST_SECTION_DEFS = [
       { path: 'veto_risk_score_min', label: '否决风险阈值', type: 'number', help: '风险分超过这个值，直接否决交易。' },
       { path: 'min_candidate_score_to_allow_buy', label: '允许买入的最低候选分', type: 'number' },
       { path: 'min_position_score_to_allow_sell', label: '允许卖出的最低持仓分', type: 'number' },
+    ],
+  },
+  {
+    key: 'candidate_pool',
+    title: '动态发现池',
+    subtitle: '控制固定白名单外的事件池候选如何被发现和加权。',
+    fields: [
+      { path: 'enable_dynamic_discovery', label: '启用动态发现', type: 'boolean' },
+      { path: 'max_dynamic_candidates', label: '最多动态候选数', type: 'number' },
+      { path: 'leader_discovery_weight', label: '榜单发现权重', type: 'number' },
+      { path: 'recent_trade_discovery_weight', label: '近期交易发现权重', type: 'number' },
+      { path: 'news_discovery_weight', label: '新闻发现权重', type: 'number' },
+      { path: 'event_discovery_bonus', label: '事件池额外加分', type: 'number' },
+    ],
+  },
+  {
+    key: 'sell_state_machine',
+    title: '卖出状态机',
+    subtitle: '控制减仓 / 清仓需要连续满足几轮条件。',
+    fields: [
+      { path: 'confirm_runs_trim', label: '减仓确认轮数', type: 'number' },
+      { path: 'confirm_runs_exit', label: '清仓确认轮数', type: 'number' },
+      { path: 'recovery_reset_threshold', label: '恢复后重置阈值', type: 'number' },
     ],
   },
 ]
@@ -508,6 +538,7 @@ function useViewModel(localData, liveData) {
     const { summary, portfolio, latestRun, history, links, completedFeatures } = localData
     const signal = latestRun?.strategySignal || {}
     const dynamicFocus = latestRun?.dynamicFocus || {}
+    const diagnostics = latestRun?.diagnostics || {}
     const latestAudit = latestRun?.audit || {}
     const latestPostContent = latestAudit?.outputs?.generated_post_content || latestRun?.state?.last_generated_post_content || ''
     const holdings = portfolio?.holdings || []
@@ -539,6 +570,7 @@ function useViewModel(localData, liveData) {
       completedFeatures,
       signal,
       dynamicFocus,
+      diagnostics,
       latestAudit,
       latestPostContent,
       holdings,
@@ -687,6 +719,13 @@ function OverviewPage({ vm, liveError }) {
 }
 
 function StrategyPage({ vm }) {
+  const pendingContext = vm.diagnostics?.pendingContext || {}
+  const regimeFeatures = vm.diagnostics?.regimeFeatures || {}
+  const candidateUniverse = vm.diagnostics?.candidateUniverse || []
+  const scoredCandidates = vm.diagnostics?.scoredCandidates || []
+  const exitCandidates = vm.diagnostics?.exitCandidates || []
+  const sellStateRows = Object.entries(vm.diagnostics?.sellState?.symbols || {}).map(([symbol, row]) => ({ symbol, ...row }))
+
   return (
     <div className="stack-page">
       <Card>
@@ -705,6 +744,7 @@ function StrategyPage({ vm }) {
           <div className="mini-card"><div className="mini-label">上次运行实际使用</div><strong>{mapLabel('profile', vm.summary.lastRunProfile, vm.summary.lastRunProfile || '无')}</strong></div>
           <div className="mini-card"><div className="mini-label">建议切换</div><strong>{mapLabel('profile', vm.signal.last_suggested_profile, vm.signal.last_suggested_profile || '无')}</strong></div>
           <div className="mini-card"><div className="mini-label">连续信号</div><strong>{vm.signal.consecutive_same_suggestion || 0} / {vm.signal.switch_signal_threshold || 0}</strong></div>
+          <div className="mini-card"><div className="mini-label">Pending 资金冻结</div><strong>{fmtMoney(pendingContext.reserved_cash)}</strong></div>
         </div>
       </Card>
 
@@ -735,9 +775,83 @@ function StrategyPage({ vm }) {
           <div className="kv-list top-space compact">
             <div><span>单一 bucket 上限</span><strong>{fmtPct(vm.portfolio.riskControls?.max_bucket_exposure)}</strong></div>
             <div><span>单一持仓上限</span><strong>{fmtPct(vm.portfolio.riskControls?.max_single_position_exposure)}</strong></div>
+            <div><span>上涨广度</span><strong>{fmtPct(regimeFeatures.breadth_positive)}</strong></div>
+            <div><span>下跌广度</span><strong>{fmtPct(regimeFeatures.breadth_negative)}</strong></div>
           </div>
         </Card>
       </div>
+
+      <div className="page-grid two-col">
+        <Card>
+          <SectionHeader title="Pending 订单上下文" subtitle="现在不会再因为一笔 pending 全局停机，而是按标的和冻结资金细分处理" />
+          <div className="kv-list compact">
+            <div><span>Pending 数量</span><strong>{pendingContext.pending_count || 0}</strong></div>
+            <div><span>冻结资金</span><strong>{fmtMoney(pendingContext.reserved_cash)}</strong></div>
+            <div><span>Pending 买入标的</span><strong>{(pendingContext.pending_buy_symbols || []).join(', ') || '无'}</strong></div>
+            <div><span>Pending 卖出标的</span><strong>{(pendingContext.pending_sell_symbols || []).join(', ') || '无'}</strong></div>
+          </div>
+        </Card>
+
+        <Card>
+          <SectionHeader title="动态候选池" subtitle="固定白名单之外，被榜单 / 近期交易 / 新闻补出来的事件池候选" />
+          <div className="focus-stack">
+            {candidateUniverse.filter((item) => item.layer === 'event').slice(0, 6).map((item) => (
+              <article key={item.symbol} className="focus-card">
+                <div className="focus-head"><strong>{item.name}</strong><span>{item.symbol}</span></div>
+                <p>{mapLabel('bucket', item.bucket, item.bucket)} / 发现原因：{(item.discovery_reasons || []).join('、') || '暂无'}</p>
+              </article>
+            ))}
+            {!candidateUniverse.some((item) => item.layer === 'event') ? <div className="subline">当前没有新增事件池候选</div> : null}
+          </div>
+        </Card>
+      </div>
+
+      <div className="page-grid two-col">
+        <Card>
+          <SectionHeader title="候选归因 Top 3" subtitle="为什么系统认为这些股票值得买，看打分拆解而不是只看总分" />
+          <div className="focus-stack">
+            {scoredCandidates.slice(0, 3).map((item) => (
+              <article key={item.symbol} className="focus-card">
+                <div className="focus-head"><strong>{item.name}</strong><span>{item.symbol} / 总分 {item.score}</span></div>
+                <p>{mapLabel('bucket', item.bucket, item.bucket)} · {mapLabel('layer', item.layer, item.layer)}</p>
+                <div className="chips vertical">
+                  {(item.score_breakdown || []).slice(0, 5).map((part, idx) => (
+                    <span key={`${item.symbol}-${idx}`} className={`chip ${part.delta >= 0 ? 'chip-primary' : 'chip-danger'}`}>{part.label}: {part.delta > 0 ? '+' : ''}{part.delta}</span>
+                  ))}
+                </div>
+              </article>
+            ))}
+            {!scoredCandidates.length ? <div className="subline">当前没有可展示的候选归因</div> : null}
+          </div>
+        </Card>
+
+        <Card>
+          <SectionHeader title="卖出状态机" subtitle="卖出不再只靠单次阈值，下面展示每个标的目前处在哪个状态" />
+          <div className="focus-stack">
+            {sellStateRows.slice(0, 6).map((item) => (
+              <article key={item.symbol} className="focus-card">
+                <div className="focus-head"><strong>{item.symbol}</strong><Badge tone={item.state?.includes('ready') ? 'red' : 'amber'}>{mapLabel('sellState', item.state, item.state)}</Badge></div>
+                <p>主因：{item.primary_reason_kind || '暂无'} / 连续触发：{item.trigger_streak || 0} / 要求：{item.required_runs || 0}</p>
+              </article>
+            ))}
+            {!sellStateRows.length ? <div className="subline">当前没有处于卖出观察链路的标的</div> : null}
+          </div>
+        </Card>
+      </div>
+
+      {exitCandidates.length ? (
+        <Card>
+          <SectionHeader title="当前卖出候选" subtitle="已经满足执行条件的减仓 / 清仓候选" />
+          <div className="focus-stack">
+            {exitCandidates.slice(0, 4).map((item) => (
+              <article key={item.symbol} className="focus-card">
+                <div className="focus-head"><strong>{item.name}</strong><span>{item.symbol}</span></div>
+                <p>{item.decision_reason}</p>
+              </article>
+            ))}
+          </div>
+        </Card>
+      ) : null}
     </div>
   )
 }
