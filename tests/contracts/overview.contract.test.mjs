@@ -57,3 +57,16 @@ test('GET /api/health returns service heartbeat', async () => {
   assert.equal(data.service, 'instreet-trade-dashboard')
   assert.equal(typeof data.time, 'string')
 })
+
+test('GET /api/config returns editable strategy config payload', async () => {
+  const data = await getJson('/api/config')
+  assert.equal(typeof data, 'object')
+  assert.equal(typeof data.generatedAt, 'string')
+  assert.equal(typeof data.strategyRoot, 'string')
+  assert.equal(typeof data.manifest, 'object')
+  assert.equal(typeof data.activeProfileId, 'string')
+  assert.ok(Array.isArray(data.profiles))
+  assert.ok(Array.isArray(data.profileOptions))
+  assert.ok(typeof data.meta === 'object')
+  assert.ok(typeof data.meta.strategyConcepts === 'object')
+})

@@ -7,6 +7,7 @@ const routes = [
   { path: '/portfolio', text: '策略快照持仓' },
   { path: '/validation', text: '验证模式分布' },
   { path: '/history', text: '最近审计记录' },
+  { path: '/config', text: '量化大策略切换' },
 ]
 
 test.describe('dashboard routes smoke', () => {

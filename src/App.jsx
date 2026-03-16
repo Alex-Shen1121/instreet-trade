@@ -67,6 +67,147 @@ const NAV_ITEMS = [
   { to: '/portfolio', label: '持仓页', desc: '快照 vs 实时' },
   { to: '/validation', label: '验证页', desc: 'dry-run / replay' },
   { to: '/history', label: '历史页', desc: '审计 / 日志 / 新闻' },
+  { to: '/config', label: '配置页', desc: '策略参数 / 大策略' },
+]
+
+const MANIFEST_SECTION_DEFS = [
+  {
+    key: 'dynamic_focus',
+    title: '动态关注层',
+    subtitle: '控制重点板块、重点股票和切换信号的灵敏度。',
+    fields: [
+      { path: 'enabled', label: '启用动态关注', type: 'boolean' },
+      { path: 'max_focus_sectors', label: '最多关注板块数', type: 'number' },
+      { path: 'max_focus_stocks', label: '最多关注股票数', type: 'number' },
+      { path: 'max_avoid_sectors', label: '最多回避方向数', type: 'number' },
+      { path: 'switch_signal_threshold', label: '切换信号阈值', type: 'number', help: '连续多少轮都指向同一大策略，才算切换信号足够强。' },
+      { path: 'confidence_required', label: '最低置信度', type: 'select', options: ['low', 'medium', 'high'], help: '动态关注层只有达到这个置信等级，才允许推进切换判断。' },
+    ],
+  },
+  {
+    key: 'llm_review',
+    title: 'LLM 最终复核',
+    subtitle: '控制模型复核是否开启、多久超时，以及能否绕过硬风控。',
+    fields: [
+      { path: 'enabled', label: '启用模型复核', type: 'boolean' },
+      { path: 'timeout_seconds', label: '超时秒数', type: 'number' },
+      { path: 'hard_constraints_cannot_override', label: '禁止绕过硬风控', type: 'boolean', help: '开启后，模型只能复核，不能推翻程序化硬限制。' },
+    ],
+  },
+  {
+    key: 'news_filter',
+    title: '新闻过滤',
+    subtitle: '控制进入策略上下文的新闻质量。',
+    fields: [
+      { path: 'enabled', label: '启用新闻过滤', type: 'boolean' },
+      { path: 'min_score', label: '最低新闻分数', type: 'number' },
+      { path: 'max_items', label: '最多保留新闻数', type: 'number' },
+      { path: 'dedupe', label: '去重', type: 'boolean' },
+    ],
+  },
+  {
+    key: 'community_signal',
+    title: '社区信号',
+    subtitle: '控制社区帖子进入上下文的范围与权重。',
+    fields: [
+      { path: 'include_in_llm_review', label: '进入最终复核上下文', type: 'boolean' },
+      { path: 'prefer_watchlist_hits', label: '只偏好观察池命中', type: 'boolean', help: '开启后，社区帖子只有命中观察池标的才更容易进入上下文。' },
+      { path: 'max_posts_dynamic_focus', label: '动态关注层最多帖子数', type: 'number' },
+      { path: 'max_posts_post', label: '发帖层最多帖子数', type: 'number' },
+    ],
+  },
+  {
+    key: 'execution_hygiene',
+    title: '执行卫生',
+    subtitle: '控制交易冷静期与来回反手约束。',
+    fields: [
+      { path: 'buy_cooldown_minutes', label: '买入冷静期（分钟）', type: 'number', help: '同一标的刚买完后，多长时间内不再继续追买。' },
+      { path: 'sell_cooldown_minutes', label: '卖出冷静期（分钟）', type: 'number' },
+      { path: 'avoid_same_day_roundtrip', label: '避免当日反手', type: 'boolean' },
+    ],
+  },
+  {
+    key: 'strategy_state_machine',
+    title: '策略状态机',
+    subtitle: '控制大策略切换的推进方式。',
+    fields: [
+      { path: 'auto_switch', label: '自动切换大策略', type: 'boolean' },
+      { path: 'manual_confirmation_required', label: '需要人工确认', type: 'boolean', help: '开启后，即使达到 switch_ready，也先通知而不自动切换。' },
+      { path: 'notify_on_switch_ready', label: 'switch_ready 时通知', type: 'boolean' },
+      { path: 'rollback_watch_rounds', label: '切换后回看轮数', type: 'number' },
+      { path: 'switch_signal_threshold', label: '状态机切换阈值', type: 'number' },
+    ],
+  },
+  {
+    key: 'review_policy',
+    title: '复核评分阈值',
+    subtitle: '让模型更像评分器，而不是自由裁判。',
+    fields: [
+      { path: 'veto_risk_score_min', label: '否决风险阈值', type: 'number', help: '风险分超过这个值，直接否决交易。' },
+      { path: 'min_candidate_score_to_allow_buy', label: '允许买入的最低候选分', type: 'number' },
+      { path: 'min_position_score_to_allow_sell', label: '允许卖出的最低持仓分', type: 'number' },
+    ],
+  },
+]
+
+const PROFILE_SECTION_DEFS = [
+  {
+    key: 'core_text',
+    title: '策略说明',
+    subtitle: '给人看的大策略描述，会影响理解和人工复核。',
+    fields: [
+      { path: 'thesis', label: '投资主线 thesis', type: 'textarea' },
+      { path: 'style', label: '执行风格 style', type: 'textarea' },
+    ],
+  },
+  {
+    key: 'trade_constraints',
+    title: '交易约束',
+    subtitle: '控制整体仓位、单次交易比例和交易频率。',
+    fields: [
+      { path: 'max_total_exposure', label: '总仓位上限', type: 'number', help: '组合允许实际持仓占总资产的最高比例。' },
+      { path: 'target_trade_fraction', label: '单次目标交易比例', type: 'number', help: '每次买卖计划动用的目标资金比例。' },
+      { path: 'lot_size', label: '最小交易手数', type: 'number' },
+      { path: 'skip_if_pending', label: '有 pending 时跳过', type: 'boolean' },
+      { path: 'max_daily_turnover_rate', label: '单日最大换手率', type: 'number' },
+      { path: 'sell_observe_minutes', label: '卖出观察期（分钟）', type: 'number', help: '卖出后多长时间内禁止重新追入。' },
+    ],
+  },
+  {
+    key: 'risk_controls',
+    title: '风险控制',
+    subtitle: '控制单一 bucket、单票和再平衡触发带宽。',
+    fields: [
+      { path: 'max_bucket_exposure', label: '单一 bucket 上限', type: 'number', help: '同一类风格或行业在组合中的最高占比。' },
+      { path: 'max_single_position_exposure', label: '单票上限', type: 'number' },
+      { path: 'rebalance_band', label: '再平衡带宽', type: 'number', help: '偏离目标超过这条带宽，才触发再平衡。' },
+    ],
+  },
+  {
+    key: 'sell_rules',
+    title: '卖出规则',
+    subtitle: '控制止盈、止损和再平衡的敏感度。',
+    fields: [
+      { path: 'take_profit_profit_rate', label: '止盈收益率阈值', type: 'number' },
+      { path: 'take_profit_day_change', label: '止盈日涨幅阈值', type: 'number' },
+      { path: 'stop_loss_profit_rate', label: '止损收益率阈值', type: 'number' },
+      { path: 'stop_loss_day_change', label: '止损日跌幅阈值', type: 'number' },
+      { path: 'trim_fraction', label: '默认减仓比例', type: 'number' },
+      { path: 'rebalance_trim_fraction', label: '再平衡减仓比例', type: 'number' },
+    ],
+  },
+  {
+    key: 'candidate_pool',
+    title: '候选池与打分',
+    subtitle: '控制候选分数门槛与候选池分层权重。',
+    fields: [
+      { path: 'scoring.min_score_to_buy', label: '最低买入分数', type: 'number' },
+      { path: 'candidate_pool.require_whitelist_for_new', label: '新增标的需要白名单', type: 'boolean' },
+      { path: 'candidate_pool.layer_weights.core', label: '核心池权重', type: 'number', help: '核心池 / 观察池 / 事件池的额外加分。' },
+      { path: 'candidate_pool.layer_weights.watch', label: '观察池权重', type: 'number' },
+      { path: 'candidate_pool.layer_weights.event', label: '事件池权重', type: 'number' },
+    ],
+  },
 ]
 
 function fmtMoney(value) {
@@ -160,30 +301,82 @@ function Table({ columns, rows, rowKey }) {
   )
 }
 
+function InfoHint({ text }) {
+  return <span className="info-hint" title={text}>!</span>
+}
+
+function getIn(obj, path) {
+  return path.split('.').reduce((acc, key) => (acc == null ? acc : acc[key]), obj)
+}
+
+function setIn(obj, path, value) {
+  const parts = path.split('.')
+  const next = structuredClone(obj || {})
+  let cursor = next
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const key = parts[i]
+    if (!cursor[key] || typeof cursor[key] !== 'object' || Array.isArray(cursor[key])) cursor[key] = {}
+    cursor = cursor[key]
+  }
+  cursor[parts.at(-1)] = value
+  return next
+}
+
+function castValue(raw, type) {
+  if (type === 'number') {
+    if (raw === '' || raw === null || raw === undefined) return 0
+    return Number(raw)
+  }
+  if (type === 'boolean') return Boolean(raw)
+  return raw
+}
+
 function useDashboardData() {
   const [localData, setLocalData] = useState(null)
   const [liveData, setLiveData] = useState(null)
+  const [configData, setConfigData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [liveLoading, setLiveLoading] = useState(false)
+  const [configLoading, setConfigLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [liveError, setLiveError] = useState('')
+  const [configError, setConfigError] = useState('')
+  const [saveMessage, setSaveMessage] = useState('')
+
+  async function loadLocal() {
+    try {
+      const res = await fetch('/api/overview')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = await res.json()
+      setLocalData(json)
+      setError('')
+    } catch (err) {
+      setError(err.message || '加载本地快照失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function loadConfig() {
+    try {
+      setConfigLoading(true)
+      const res = await fetch('/api/config')
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+      setConfigData(json)
+      setConfigError('')
+    } catch (err) {
+      setConfigError(err.message || '加载策略配置失败')
+    } finally {
+      setConfigLoading(false)
+    }
+  }
 
   useEffect(() => {
     let timer
-    async function loadLocal() {
-      try {
-        const res = await fetch('/api/overview')
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const json = await res.json()
-        setLocalData(json)
-        setError('')
-      } catch (err) {
-        setError(err.message || '加载本地快照失败')
-      } finally {
-        setLoading(false)
-      }
-    }
     loadLocal()
+    loadConfig()
     timer = setInterval(loadLocal, 30000)
     return () => clearInterval(timer)
   }, [])
@@ -209,7 +402,60 @@ function useDashboardData() {
     return () => clearInterval(timer)
   }, [])
 
-  return { localData, liveData, loading, liveLoading, error, liveError, refreshLive }
+  async function saveConfig(url, payload, successText) {
+    try {
+      setSaving(true)
+      setSaveMessage('')
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`)
+      setConfigData(json)
+      setConfigError('')
+      setSaveMessage(successText)
+      await loadLocal()
+      return json
+    } catch (err) {
+      setConfigError(err.message || '保存配置失败')
+      throw err
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function updateManifest(patch) {
+    return saveConfig('/api/config/manifest', { patch }, '全局策略参数已保存')
+  }
+
+  function updateProfile(profileId, patch) {
+    return saveConfig(`/api/config/profiles/${profileId}`, { patch }, `策略 ${profileId} 参数已保存`)
+  }
+
+  function updateActiveProfile(profileId) {
+    return saveConfig('/api/config/active-profile', { profileId }, `已切换量化大策略到 ${profileId}`)
+  }
+
+  return {
+    localData,
+    liveData,
+    configData,
+    loading,
+    liveLoading,
+    configLoading,
+    saving,
+    error,
+    liveError,
+    configError,
+    saveMessage,
+    refreshLive,
+    refreshConfig: loadConfig,
+    updateManifest,
+    updateProfile,
+    updateActiveProfile,
+  }
 }
 
 function useViewModel(localData, liveData) {
@@ -627,8 +873,215 @@ function HistoryPage({ vm }) {
   )
 }
 
+function ConfigSectionCard({ title, subtitle, source, fields, onSave, saving }) {
+  const [draft, setDraft] = useState({})
+
+  useEffect(() => {
+    const next = {}
+    fields.forEach((field) => {
+      const value = getIn(source || {}, field.path)
+      next[field.path] = value ?? (field.type === 'boolean' ? false : '')
+    })
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(next)
+  }, [source, fields])
+
+  async function handleSave() {
+    let patch = {}
+    fields.forEach((field) => {
+      patch = setIn(patch, field.path, castValue(draft[field.path], field.type))
+    })
+    await onSave(patch)
+  }
+
+  return (
+    <Card>
+      <SectionHeader title={title} subtitle={subtitle} />
+      <div className="config-grid">
+        {fields.map((field) => (
+          <label key={field.path} className={`config-field ${field.type === 'textarea' ? 'config-field-full' : ''}`}>
+            <span className="config-label">{field.label}{field.help ? <InfoHint text={field.help} /> : null}</span>
+            {field.type === 'boolean' ? (
+              <input type="checkbox" checked={Boolean(draft[field.path])} onChange={(e) => setDraft((prev) => ({ ...prev, [field.path]: e.target.checked }))} />
+            ) : field.type === 'select' ? (
+              <select value={draft[field.path] ?? ''} onChange={(e) => setDraft((prev) => ({ ...prev, [field.path]: e.target.value }))}>
+                {field.options.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            ) : field.type === 'textarea' ? (
+              <textarea value={draft[field.path] ?? ''} onChange={(e) => setDraft((prev) => ({ ...prev, [field.path]: e.target.value }))} rows={4} />
+            ) : (
+              <input type="number" step="0.01" value={draft[field.path] ?? ''} onChange={(e) => setDraft((prev) => ({ ...prev, [field.path]: e.target.value }))} />
+            )}
+          </label>
+        ))}
+      </div>
+      <button className="save-button" onClick={handleSave} disabled={saving}>{saving ? '保存中…' : '保存这一组参数'}</button>
+    </Card>
+  )
+}
+
+function ObjectNumberCard({ title, subtitle, source, helpMap = {}, onSave, saving }) {
+  const [draft, setDraft] = useState({})
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(source || {})
+  }, [source])
+
+  async function handleSave() {
+    const patch = {}
+    Object.entries(draft || {}).forEach(([key, value]) => {
+      patch[key] = Number(value)
+    })
+    await onSave(patch)
+  }
+
+  return (
+    <Card>
+      <SectionHeader title={title} subtitle={subtitle} />
+      <div className="config-grid">
+        {Object.entries(draft || {}).map(([key, value]) => (
+          <label key={key} className="config-field">
+            <span className="config-label">{mapLabel('bucket', key, key)}{helpMap[key] ? <InfoHint text={helpMap[key]} /> : null}</span>
+            <input type="number" step="0.01" value={value ?? ''} onChange={(e) => setDraft((prev) => ({ ...prev, [key]: e.target.value }))} />
+          </label>
+        ))}
+      </div>
+      <button className="save-button" onClick={handleSave} disabled={saving}>{saving ? '保存中…' : '保存这一组参数'}</button>
+    </Card>
+  )
+}
+
+function ConfigPage({ configData, configLoading, configError, saveMessage, saving, onRefresh, onUpdateManifest, onUpdateProfile, onUpdateActiveProfile }) {
+  if (configLoading && !configData) return <div className="screen-state">正在加载策略配置…</div>
+  if (!configData) return <div className="screen-state error-state">配置加载失败：{configError || '未知错误'}</div>
+
+  const activeProfile = configData.profiles.find((item) => item.profile_id === configData.activeProfileId) || configData.profiles[0]
+
+  return (
+    <div className="stack-page config-page">
+      <header className="hero-v2 config-hero">
+        <div className="hero-copy-block">
+          <div className="hero-eyebrow">策略配置中心 / Live Editable</div>
+          <h2>看清每套量化策略的关键参数，也能直接在线调整</h2>
+          <p>
+            这里会直接读取真实策略配置文件。你可以切换量化大策略，也可以在线调整阈值、仓位、卖出规则和候选池权重。
+            带感叹号的地方是容易误解的概念解释。
+          </p>
+        </div>
+        <div className="hero-status-grid">
+          <div className="hero-status-card bright">
+            <span>当前量化大策略</span>
+            <strong>{mapLabel('profile', configData.activeProfileId, activeProfile?.label || configData.activeProfileId)}</strong>
+            <small>{activeProfile?.thesis || '暂无策略说明'}</small>
+          </div>
+          <div className="hero-status-card">
+            <span>配置源</span>
+            <strong>{configData.strategyRoot}</strong>
+            <small>修改后会直接写回 JSON 配置文件</small>
+          </div>
+          <div className="hero-status-card">
+            <span>保存状态</span>
+            <strong>{saveMessage || '尚未修改'}</strong>
+            <small>{configError || '你也可以手动刷新配置数据'}</small>
+          </div>
+        </div>
+      </header>
+
+      <Card>
+        <SectionHeader title="量化大策略切换" subtitle="切换 active profile，影响下一轮策略运行所采用的大策略模板。" extra={<button className="ghost-inline-button" onClick={onRefresh}>刷新配置</button>} />
+        <div className="profile-switch-grid">
+          {configData.profileOptions.map((profile) => (
+            <article key={profile.profile_id} className={`profile-switch-card ${configData.activeProfileId === profile.profile_id ? 'active' : ''}`}>
+              <div>
+                <strong>{profile.label}</strong>
+                <div className="subline">{profile.profile_id}</div>
+              </div>
+              <p>{profile.thesis}</p>
+              <button className="save-button slim" disabled={saving || configData.activeProfileId === profile.profile_id} onClick={() => onUpdateActiveProfile(profile.profile_id)}>
+                {configData.activeProfileId === profile.profile_id ? '当前策略' : '切到这套策略'}
+              </button>
+            </article>
+          ))}
+        </div>
+      </Card>
+
+      <div className="page-grid two-col">
+        {MANIFEST_SECTION_DEFS.map((section) => (
+          <ConfigSectionCard
+            key={section.key}
+            title={section.title}
+            subtitle={section.subtitle}
+            source={configData.manifest?.[section.key]}
+            fields={section.fields}
+            saving={saving}
+            onSave={(patch) => onUpdateManifest({ [section.key]: patch })}
+          />
+        ))}
+      </div>
+
+      {activeProfile ? (
+        <>
+          <Card>
+            <SectionHeader title={`当前编辑策略：${activeProfile.label}`} subtitle="下面这部分是 active profile 的核心参数，改完会直接写回对应 profile JSON。" />
+            <div className="kv-list compact">
+              <div><span>profile_id</span><strong>{activeProfile.profile_id}</strong></div>
+              <div><span>当前 thesis</span><strong>{activeProfile.thesis}</strong></div>
+            </div>
+          </Card>
+
+          <div className="page-grid two-col">
+            {PROFILE_SECTION_DEFS.map((section) => (
+              <ConfigSectionCard
+                key={section.key}
+                title={section.title}
+                subtitle={section.subtitle}
+                source={activeProfile}
+                fields={section.fields}
+                saving={saving}
+                onSave={(patch) => onUpdateProfile(activeProfile.profile_id, patch)}
+              />
+            ))}
+            <ObjectNumberCard
+              title="目标 bucket 配比"
+              subtitle="系统希望长期维持的理想结构。"
+              source={activeProfile.bucket_targets}
+              saving={saving}
+              onSave={(patch) => onUpdateProfile(activeProfile.profile_id, { bucket_targets: patch })}
+            />
+            <ObjectNumberCard
+              title="bucket 最低配置"
+              subtitle="某些关键方向至少要保留的底仓比例。"
+              source={activeProfile.bucket_minimums}
+              saving={saving}
+              onSave={(patch) => onUpdateProfile(activeProfile.profile_id, { bucket_minimums: patch })}
+            />
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 function App() {
-  const { localData, liveData, loading, liveLoading, error, liveError, refreshLive } = useDashboardData()
+  const {
+    localData,
+    liveData,
+    configData,
+    loading,
+    liveLoading,
+    configLoading,
+    saving,
+    error,
+    liveError,
+    configError,
+    saveMessage,
+    refreshLive,
+    refreshConfig,
+    updateManifest,
+    updateProfile,
+    updateActiveProfile,
+  } = useDashboardData()
   const vm = useViewModel(localData, liveData)
 
   if (loading) return <div className="screen-state">正在加载 dashboard...</div>
@@ -643,6 +1096,7 @@ function App() {
         <Route path="/portfolio" element={<PortfolioPage vm={vm} />} />
         <Route path="/validation" element={<ValidationPage vm={vm} />} />
         <Route path="/history" element={<HistoryPage vm={vm} />} />
+        <Route path="/config" element={<ConfigPage configData={configData} configLoading={configLoading} configError={configError} saveMessage={saveMessage} saving={saving} onRefresh={refreshConfig} onUpdateManifest={updateManifest} onUpdateProfile={updateProfile} onUpdateActiveProfile={updateActiveProfile} />} />
       </Routes>
     </Layout>
   )
