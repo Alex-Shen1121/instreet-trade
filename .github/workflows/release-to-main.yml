@@ -35,22 +35,66 @@ jobs:
           fi
           echo "Using PR #$PR_NUMBER"
 
-      - name: Enable auto-merge to main
+      - name: Wait for required PR checks and merge to main
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           PR_NUMBER=$(gh pr list --repo "$REPO" --base main --head release --json number --jq '.[0].number')
+          export PR_NUMBER
           if [ -z "$PR_NUMBER" ]; then
             echo "No open PR found for release -> main"
             exit 0
           fi
 
-          STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state')
-          if [ "$STATE" != "OPEN" ]; then
-            echo "PR #$PR_NUMBER is already $STATE"
-            exit 0
-          fi
+          for i in $(seq 1 45); do
+            STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state')
+            if [ "$STATE" != "OPEN" ]; then
+              echo "PR #$PR_NUMBER is already $STATE"
+              exit 0
+            fi
 
-          echo "Enable auto-merge for PR #$PR_NUMBER"
-          gh pr merge "$PR_NUMBER" --repo "$REPO" --auto --rebase --delete-branch=false
+            COUNTS=$(python3 - <<'PY'
+import json, os, re, subprocess
+repo=os.environ['REPO']
+pr=os.environ['PR_NUMBER']
+raw=subprocess.check_output(['gh','pr','view',pr,'--repo',repo,'--json','statusCheckRollup'], text=True)
+checks=json.loads(raw).get('statusCheckRollup', [])
+relevant=[]
+for c in checks:
+    url=c.get('detailsUrl','')
+    m=re.search(r'/runs/(\d+)/', url)
+    if not m:
+        continue
+    run=json.loads(subprocess.check_output(['gh','run','view',m.group(1),'--repo',repo,'--json','event,name,status,conclusion,headBranch'], text=True))
+    if run.get('event') != 'pull_request':
+        continue
+    relevant.append(c)
+failed=sum(1 for c in relevant if c.get('status') == 'COMPLETED' and c.get('conclusion') not in (None, '', 'SUCCESS', 'SKIPPED', 'NEUTRAL'))
+pending=sum(1 for c in relevant if c.get('status') != 'COMPLETED')
+print(json.dumps({'total': len(relevant), 'pending': pending, 'failed': failed}, ensure_ascii=False))
+PY
+)
+            TOTAL=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["total"])')
+            PENDING=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["pending"])')
+            FAILED=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["failed"])')
+
+            echo "PR #$PR_NUMBER required PR checks => total:$TOTAL pending:$PENDING failed:$FAILED"
+
+            if [ "$FAILED" != "0" ]; then
+              echo "PR #$PR_NUMBER has failing required PR checks"
+              gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup
+              exit 1
+            fi
+
+            if [ "$TOTAL" != "0" ] && [ "$PENDING" = "0" ]; then
+              gh pr merge "$PR_NUMBER" --repo "$REPO" --rebase --delete-branch=false
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "Timed out waiting for PR #$PR_NUMBER required PR checks to finish"
+          gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup
+          exit 1
