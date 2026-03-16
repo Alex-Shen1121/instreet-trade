@@ -56,27 +56,7 @@ jobs:
               exit 0
             fi
 
-            COUNTS=$(python3 - <<'PY'
-import json, os, re, subprocess
-repo=os.environ['REPO']
-pr=os.environ['PR_NUMBER']
-raw=subprocess.check_output(['gh','pr','view',pr,'--repo',repo,'--json','statusCheckRollup'], text=True)
-checks=json.loads(raw).get('statusCheckRollup', [])
-relevant=[]
-for c in checks:
-    url=c.get('detailsUrl','')
-    m=re.search(r'/runs/(\d+)/', url)
-    if not m:
-        continue
-    run=json.loads(subprocess.check_output(['gh','run','view',m.group(1),'--repo',repo,'--json','event,name,status,conclusion,headBranch'], text=True))
-    if run.get('event') != 'pull_request':
-        continue
-    relevant.append(c)
-failed=sum(1 for c in relevant if c.get('status') == 'COMPLETED' and c.get('conclusion') not in (None, '', 'SUCCESS', 'SKIPPED', 'NEUTRAL'))
-pending=sum(1 for c in relevant if c.get('status') != 'COMPLETED')
-print(json.dumps({'total': len(relevant), 'pending': pending, 'failed': failed}, ensure_ascii=False))
-PY
-)
+            COUNTS=$(python3 -c "import json,re,subprocess; repo='${REPO}'; pr='${PR_NUMBER}'; checks=json.loads(subprocess.check_output(['gh','pr','view',pr,'--repo',repo,'--json','statusCheckRollup'], text=True)).get('statusCheckRollup', []); relevant=[c for c in checks if (m:=re.search(r'/runs/(\\d+)/', c.get('detailsUrl',''))) and json.loads(subprocess.check_output(['gh','run','view',m.group(1),'--repo',repo,'--json','event'], text=True)).get('event')=='pull_request']; failed=sum(1 for c in relevant if c.get('status') == 'COMPLETED' and c.get('conclusion') not in (None, '', 'SUCCESS', 'SKIPPED', 'NEUTRAL')); pending=sum(1 for c in relevant if c.get('status') != 'COMPLETED'); print(json.dumps({'total': len(relevant), 'pending': pending, 'failed': failed}, ensure_ascii=False))")
             TOTAL=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["total"])')
             PENDING=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["pending"])')
             FAILED=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["failed"])')
