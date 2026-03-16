@@ -21,6 +21,11 @@ jobs:
         run: |
           PR_NUMBER=$(gh pr list --repo "$REPO" --base release --head "$BRANCH" --json number --jq '.[0].number')
           if [ -z "$PR_NUMBER" ]; then
+            AHEAD_BY=$(gh api repos/$REPO/compare/release...$BRANCH --jq '.ahead_by')
+            if [ "$AHEAD_BY" = "0" ]; then
+              echo "No new commits to promote from $BRANCH to release"
+              exit 0
+            fi
             gh pr create \
               --repo "$REPO" \
               --base release \

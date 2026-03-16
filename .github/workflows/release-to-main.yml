@@ -20,6 +20,11 @@ jobs:
         run: |
           PR_NUMBER=$(gh pr list --repo "$REPO" --base main --head release --json number --jq '.[0].number')
           if [ -z "$PR_NUMBER" ]; then
+            AHEAD_BY=$(gh api repos/$REPO/compare/main...release --jq '.ahead_by')
+            if [ "$AHEAD_BY" = "0" ]; then
+              echo "Release has no new commits to promote to main"
+              exit 0
+            fi
             gh pr create \
               --repo "$REPO" \
               --base main \
