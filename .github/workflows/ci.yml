@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Start app
+        env:
+          NODE_ENV: production
+          PORT: 33210
+          INSTREET_WORKSPACE: /tmp/instreet-workspace
+        run: |
+          mkdir -p "$INSTREET_WORKSPACE"
+          nohup node server/index.mjs > /tmp/instreet-dashboard.log 2>&1 &
+          APP_PID=$!
+          echo "$APP_PID" > /tmp/instreet-dashboard.pid
+          echo "Started app with PID $APP_PID"
+
+      - name: Wait for health check
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:33210/api/health >/tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "App failed to become healthy"
+          cat /tmp/instreet-dashboard.log || true
+          exit 1
+
+      - name: Smoke test overview endpoint
+        run: |
+          curl -fsS http://127.0.0.1:33210/api/overview >/tmp/overview.json
+          node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync('/tmp/overview.json','utf8')); if(!data.summary || !data.latestRun){throw new Error('overview payload missing expected fields')} console.log('overview ok')"
+
+      - name: Upload app log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instreet-dashboard-log
+          path: /tmp/instreet-dashboard.log
+          if-no-files-found: ignore
+
+      - name: Stop app
+        if: always()
+        run: |
+          if [ -f /tmp/instreet-dashboard.pid ]; then
+            kill $(cat /tmp/instreet-dashboard.pid) || true
+          fi
