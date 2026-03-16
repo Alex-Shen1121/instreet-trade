@@ -1,7 +1,15 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getAuditContent, getDashboardData, getLiveInStreetData, getLogContent } from './data-service.mjs';
+import {
+  getAuditContent,
+  getDashboardData,
+  getLiveInStreetData,
+  getLogContent,
+  getStrategyConfigData,
+  updateManifestConfig,
+  updateProfileConfig,
+} from './data-service.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,6 +19,11 @@ const app = express();
 const port = Number(process.env.PORT || 3210);
 
 app.use(express.json({ limit: '1mb' }));
+
+function handleApiError(res, error) {
+  const message = error?.message || 'request failed';
+  res.status(400).json({ error: message });
+}
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'instreet-trade-dashboard', time: new Date().toISOString() });
@@ -26,6 +39,39 @@ app.get('/api/live', async (_req, res) => {
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message || 'live fetch failed' });
+  }
+});
+
+app.get('/api/config', (_req, res) => {
+  try {
+    res.json(getStrategyConfigData());
+  } catch (error) {
+    handleApiError(res, error);
+  }
+});
+
+app.patch('/api/config/manifest', (req, res) => {
+  try {
+    res.json(updateManifestConfig(req.body?.patch ?? req.body));
+  } catch (error) {
+    handleApiError(res, error);
+  }
+});
+
+app.patch('/api/config/active-profile', (req, res) => {
+  try {
+    const profileId = req.body?.profileId;
+    res.json(updateManifestConfig({ active_profile: profileId }));
+  } catch (error) {
+    handleApiError(res, error);
+  }
+});
+
+app.patch('/api/config/profiles/:profileId', (req, res) => {
+  try {
+    res.json(updateProfileConfig(req.params.profileId, req.body?.patch ?? req.body));
+  } catch (error) {
+    handleApiError(res, error);
   }
 });
 

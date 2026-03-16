@@ -220,10 +220,76 @@ a { color: inherit; text-decoration: none; }
   .stats-grid.v2, .stats-grid.compact, .mini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+.config-page .hero-copy-block p { max-width: 58ch; }
+.config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.config-field { display: grid; gap: 8px; }
+.config-field-full { grid-column: 1 / -1; }
+.config-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #334155; font-weight: 700; }
+.config-field input[type='number'],
+.config-field select,
+.config-field textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 11px 12px;
+  font: inherit;
+  background: #fff;
+  color: #0f172a;
+}
+.config-field input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+}
+.info-hint {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: help;
+}
+.save-button, .ghost-inline-button {
+  border: none;
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.save-button {
+  margin-top: 16px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+}
+.save-button.slim { margin-top: 10px; padding: 10px 12px; }
+.save-button:disabled, .ghost-inline-button:disabled { opacity: 0.6; cursor: not-allowed; }
+.ghost-inline-button {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+.profile-switch-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.profile-switch-card {
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+.profile-switch-card.active {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: linear-gradient(135deg, #eff6ff, #ffffff);
+}
+.profile-switch-card p { margin: 10px 0 0; color: #334155; line-height: 1.7; }
+.config-hero .hero-status-card strong { font-size: 20px; word-break: break-word; }
+
 @media (max-width: 860px) {
   .app-shell { width: calc(100vw - 12px); padding: 6px 0 20px; }
   .hero-copy-block h2 { font-size: 34px; }
   .banner-value, .banner-value.smallish { font-size: 28px; }
-  .stats-grid.v2, .stats-grid.compact, .mini-grid { grid-template-columns: 1fr; }
+  .stats-grid.v2, .stats-grid.compact, .mini-grid, .config-grid, .profile-switch-grid { grid-template-columns: 1fr; }
   .sidebar-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

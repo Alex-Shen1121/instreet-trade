@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 const WORKSPACE = process.env.INSTREET_WORKSPACE || '/root/.openclaw/workspace-fund-manager';
+const STRATEGY_ROOT = '/root/.openclaw/skills/instreet-arena-trader/scripts';
 const TRADE_LOG_WIKI = 'https://acn25ylq5k0i.feishu.cn/wiki/SwGHwZeLYiwZW5kPJcfcqLPsnAc?fromScene=spaceOverview';
 const OVERVIEW_WIKI = 'https://acn25ylq5k0i.feishu.cn/wiki/FpUowfz2iiyxyskJTtYcCm7rnFe?fromScene=spaceOverview';
 
@@ -16,10 +17,36 @@ const paths = {
   acceptanceState: path.join(WORKSPACE, '.instreet_acceptance_state.json'),
   switchEvaluations: path.join(WORKSPACE, '.instreet_switch_evaluations.json'),
   arena: path.join(WORKSPACE, '.instreet_arena.json'),
-  manifest: '/root/.openclaw/skills/instreet-arena-trader/scripts/strategy_manifest.json',
+  manifest: path.join(STRATEGY_ROOT, 'strategy_manifest.json'),
+  profilesDir: path.join(STRATEGY_ROOT, 'profiles'),
   auditDir: path.join(WORKSPACE, 'audit', 'instreet_cycle', 'runs'),
   logDir: path.join(WORKSPACE, 'logs', 'instreet_cycle'),
 };
+
+const ALLOWED_MANIFEST_KEYS = new Set([
+  'active_profile',
+  'llm_review',
+  'dynamic_focus',
+  'community_signal',
+  'news_filter',
+  'execution_hygiene',
+  'strategy_state_machine',
+  'review_policy',
+]);
+
+const ALLOWED_PROFILE_KEYS = new Set([
+  'label',
+  'thesis',
+  'style',
+  'trade_constraints',
+  'scoring',
+  'risk_controls',
+  'sell_rules',
+  'bucket_targets',
+  'bucket_minimums',
+  'candidate_pool',
+  'correlation_groups',
+]);
 
 function exists(filePath) {
   return fs.existsSync(filePath);
@@ -41,6 +68,10 @@ function readText(filePath, fallback = '') {
   } catch {
     return fallback;
   }
+}
+
+function writeJson(filePath, data) {
+  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
 }
 
 function listFiles(dir, suffix = '') {
@@ -71,6 +102,20 @@ function tailLines(filePath, limit = 160) {
   if (!text) return '';
   const lines = text.trimEnd().split('\n');
   return lines.slice(-limit).join('\n');
+}
+
+function deepMerge(target, patch) {
+  if (Array.isArray(patch)) return patch.slice();
+  if (!patch || typeof patch !== 'object') return patch;
+  const base = target && typeof target === 'object' && !Array.isArray(target) ? { ...target } : {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      base[key] = deepMerge(base[key], value);
+    } else {
+      base[key] = value;
+    }
+  }
+  return base;
 }
 
 function getLatestAudit(state, audits) {
@@ -113,6 +158,7 @@ function buildCompletedFeatures() {
     { key: 'feishu', title: '飞书知识库同步', desc: '交易日志按 日期/时间 落档，并维护持仓规划总览', status: 'done' },
     { key: 'cron', title: 'Cron 自动执行', desc: '交易时段按计划自动巡检和同步', status: 'done' },
     { key: 'dashboard', title: 'Dashboard 混合模式', desc: '页面同时展示本地审计快照与实时 InStreet 拉取结果', status: 'done' },
+    { key: 'config', title: '策略配置页', desc: '支持查看和调整大策略与关键量化参数', status: 'done' },
   ];
 }
 
@@ -144,6 +190,86 @@ function mapLiveSummary(live) {
     leaderboard: leaderboard.slice(0, 5),
     tradeSummary: summarizeTrades(trades),
   };
+}
+
+function buildConfigMeta() {
+  return {
+    strategyConcepts: {
+      max_total_exposure: '总仓位上限：组合允许实际持仓占总资产的最高比例，用来控制整体风险暴露。',
+      target_trade_fraction: '单次目标交易比例：每一轮新开仓或调仓时，系统倾向动用的资金比例。',
+      max_bucket_exposure: '单一 bucket 上限：同一类风格/行业在组合中的最高占比，防止一边倒。',
+      rebalance_band: '再平衡带宽：只有当实际仓位偏离目标超过这条带宽时，才触发再平衡，避免过度交易。',
+      veto_risk_score_min: '否决风险阈值：模型复核给出的风险分超过这个值，就直接否掉交易。',
+      switch_signal_threshold: '切换信号阈值：连续几轮都指向同一大策略，系统才认为切换信号足够强。',
+      confidence_required: '切换所需置信度：动态关注层给出的结论，至少要达到这个置信等级才进入切换链路。',
+      buy_cooldown_minutes: '买入冷静期：同一标的刚买完后，多长时间内不再重复追买。',
+      sell_observe_minutes: '卖出观察期：刚卖出后，多长时间内禁止重新追入，避免来回反手。',
+      layer_weights: '候选池分层权重：核心池/观察池/事件池在候选打分时的额外加权。',
+      bucket_targets: '目标仓位：系统希望长期维持的 bucket 理想占比。',
+      bucket_minimums: '最低配置：某些关键 bucket 至少应保留的底仓比例。',
+    },
+  };
+}
+
+function listStrategyProfiles() {
+  return listFiles(paths.profilesDir, '.json')
+    .map((file) => ({ ...readJson(file.path, {}), fileName: file.name, updatedAt: file.updatedAt }))
+    .filter((item) => item?.profile_id);
+}
+
+export function getStrategyConfigData() {
+  const manifest = readJson(paths.manifest, {});
+  const profiles = listStrategyProfiles();
+  return {
+    generatedAt: new Date().toISOString(),
+    strategyRoot: STRATEGY_ROOT,
+    manifest,
+    activeProfileId: manifest.active_profile || null,
+    profiles,
+    profileOptions: profiles.map((profile) => ({
+      profile_id: profile.profile_id,
+      label: profile.label,
+      thesis: profile.thesis,
+      style: profile.style,
+    })),
+    meta: buildConfigMeta(),
+  };
+}
+
+export function updateManifestConfig(patch = {}) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new Error('manifest patch must be an object');
+  }
+  for (const key of Object.keys(patch)) {
+    if (!ALLOWED_MANIFEST_KEYS.has(key)) {
+      throw new Error(`manifest key not allowed: ${key}`);
+    }
+  }
+  const current = readJson(paths.manifest, {});
+  const next = deepMerge(current, patch);
+  if (next.active_profile && !exists(path.join(paths.profilesDir, `${next.active_profile}.json`))) {
+    throw new Error(`active profile not found: ${next.active_profile}`);
+  }
+  writeJson(paths.manifest, next);
+  return getStrategyConfigData();
+}
+
+export function updateProfileConfig(profileId, patch = {}) {
+  if (!profileId) throw new Error('profileId is required');
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new Error('profile patch must be an object');
+  }
+  for (const key of Object.keys(patch)) {
+    if (!ALLOWED_PROFILE_KEYS.has(key)) {
+      throw new Error(`profile key not allowed: ${key}`);
+    }
+  }
+  const profilePath = path.join(paths.profilesDir, `${profileId}.json`);
+  if (!exists(profilePath)) throw new Error(`profile not found: ${profileId}`);
+  const current = readJson(profilePath, {});
+  const next = deepMerge(current, patch);
+  writeJson(profilePath, next);
+  return getStrategyConfigData();
 }
 
 export function getDashboardData() {
@@ -244,7 +370,7 @@ export async function getLiveInStreetData() {
   const arena = readJson(paths.arena, {});
   const manifest = readJson(paths.manifest, {});
   const apiKey = arena?.api_key;
-  const baseUrl = arena?.base_url || manifest?.base_url;
+  const baseUrl = arena?.api_key ? arena?.base_url || manifest?.base_url : manifest?.base_url;
 
   if (!apiKey || !baseUrl) {
     throw new Error('missing InStreet credentials or base URL');
