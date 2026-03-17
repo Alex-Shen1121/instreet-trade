@@ -90,8 +90,8 @@ jobs:
             fi
 
             if [ "$PENDING" = "0" ]; then
-              gh pr merge "$PR_NUMBER" --repo "$REPO" --rebase --delete-branch=false || \
-              gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch=false || { echo "All merge strategies failed"; exit 1; }
+              gh pr merge "$PR_NUMBER" --repo "$REPO" --auto --rebase --delete-branch=false || \
+              gh pr merge "$PR_NUMBER" --repo "$REPO" --auto --squash --delete-branch=false || { echo "All merge strategies failed"; exit 1; }
               exit 0
             fi
 
