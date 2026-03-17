@@ -1,22 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import './App.css'
 
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6']
+
+const PortfolioExposureChart = lazy(() => import('./components/PortfolioExposureChart.jsx'))
+const ValidationCharts = lazy(() => import('./components/ValidationCharts.jsx'))
 
 const LABELS = {
   action: {
@@ -340,6 +329,10 @@ function SectionHeader({ title, subtitle, extra }) {
 
 function Card({ children, className = '' }) {
   return <section className={`card ${className}`.trim()}>{children}</section>
+}
+
+function ChartFallback({ height = 300, text = '图表加载中…' }) {
+  return <div className="chart-fallback" style={{ minHeight: `${height}px` }}>{text}</div>
 }
 
 function Table({ columns, rows, rowKey }) {
@@ -893,19 +886,9 @@ function PortfolioPage({ vm }) {
       <div className="page-grid two-col">
         <Card>
           <SectionHeader title="仓位结构" subtitle="当前 bucket 暴露分布" />
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie data={vm.exposures} dataKey="value" nameKey="name" innerRadius={60} outerRadius={104} paddingAngle={2}>
-                {vm.exposures.map((entry, index) => <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />)}
-              </Pie>
-              <Tooltip formatter={(value) => fmtPct(value)} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="legend-grid">
-            {vm.exposures.map((entry, index) => (
-              <div key={entry.rawName} className="legend-item"><span className="legend-dot" style={{ backgroundColor: COLORS[index % COLORS.length] }} /><span>{entry.name}</span><strong>{fmtPct(entry.value)}</strong></div>
-            ))}
-          </div>
+          <Suspense fallback={<ChartFallback height={300} />}>
+            <PortfolioExposureChart exposures={vm.exposures} colors={COLORS} fmtPct={fmtPct} />
+          </Suspense>
         </Card>
         <Card>
           <SectionHeader title="账户对照" subtitle="快照账户 vs 实时账户" />
@@ -925,45 +908,9 @@ function ValidationPage({ vm }) {
   return (
     <div className="stack-page">
       <div className="page-grid two-col">
-        <Card>
-          <SectionHeader title="最近运行模式统计" subtitle="最近几次记录里，实盘 / 模拟 / 回放各有多少次" />
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={vm.auditModes}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" />
-              <YAxis allowDecimals={false} />
-              <Tooltip />
-              <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#2563eb" />
-            </BarChart>
-          </ResponsiveContainer>
-          <div className="mode-badges">
-            {vm.auditModes.map((item) => <Badge key={item.rawName} tone="blue">{item.name}</Badge>)}
-          </div>
-        </Card>
-        <Card>
-          <SectionHeader title="最近审计记录里的总资产变化" subtitle="横轴是审计时间，纵轴是当时总资产；这不是实时收益曲线" />
-          <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={vm.assetTrend}>
-              <defs>
-                <linearGradient id="assetFill" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="5%" stopColor="#2563eb" stopOpacity={0.35} />
-                  <stop offset="95%" stopColor="#2563eb" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" />
-              <YAxis tickFormatter={(value) => `${(Number(value) / 10000).toFixed(0)}万`} />
-              <Tooltip
-                formatter={(value) => fmtMoney(value)}
-                labelFormatter={(label, payload) => {
-                  const modeLabel = payload?.[0]?.payload?.modeLabel
-                  return modeLabel ? `审计时间 ${label} · ${modeLabel}` : `审计时间 ${label}`
-                }}
-              />
-              <Area type="monotone" dataKey="totalValue" stroke="#2563eb" fill="url(#assetFill)" strokeWidth={3} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </Card>
+        <Suspense fallback={<ChartFallback height={320} />}>
+          <ValidationCharts auditModes={vm.auditModes} assetTrend={vm.assetTrend} fmtMoney={fmtMoney} />
+        </Suspense>
       </div>
 
       <Card>
