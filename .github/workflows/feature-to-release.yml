@@ -5,6 +5,10 @@ on:
     branches:
       - 'feature/**'
 
+concurrency:
+  group: feature-to-release-${{ github.ref_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
@@ -50,29 +54,69 @@ jobs:
           fi
 
           for i in $(seq 1 45); do
-            STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state --jq '.state')
+            PR_JSON=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state,mergeable,mergeStateStatus,statusCheckRollup)
+            STATE=$(echo "$PR_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin)["state"])')
+            MERGEABLE=$(echo "$PR_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("mergeable") or "UNKNOWN")')
+            MERGE_STATE=$(echo "$PR_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("mergeStateStatus") or "UNKNOWN")')
+
             if [ "$STATE" != "OPEN" ]; then
               echo "PR #$PR_NUMBER is already $STATE"
               exit 0
             fi
 
-            COUNTS=$(python3 -c "import json,re,subprocess; repo='${REPO}'; pr='${PR_NUMBER}'; checks=json.loads(subprocess.check_output(['gh','pr','view',pr,'--repo',repo,'--json','statusCheckRollup'], text=True)).get('statusCheckRollup', []); relevant=[c for c in checks if (m:=re.search(r'/runs/(\\d+)/', c.get('detailsUrl',''))) and json.loads(subprocess.check_output(['gh','run','view',m.group(1),'--repo',repo,'--json','event'], text=True)).get('event')=='pull_request']; failed=sum(1 for c in relevant if c.get('status') == 'COMPLETED' and c.get('conclusion') not in (None, '', 'SUCCESS', 'SKIPPED', 'NEUTRAL')); pending=sum(1 for c in relevant if c.get('status') != 'COMPLETED'); print(json.dumps({'total': len(relevant), 'pending': pending, 'failed': failed}, ensure_ascii=False))")
+            if [ "$MERGEABLE" = "CONFLICTING" ] || [ "$MERGE_STATE" = "DIRTY" ]; then
+              echo "PR #$PR_NUMBER has merge conflicts against release"
+              echo "$PR_JSON"
+              exit 1
+            fi
+
+            COUNTS=$(PR_JSON="$PR_JSON" REPO="$REPO" python3 - <<'PY'
+              import json
+              import os
+              import re
+              import subprocess
+
+              repo = os.environ['REPO']
+              data = json.loads(os.environ['PR_JSON'])
+              checks = data.get('statusCheckRollup', [])
+              relevant = []
+              for check in checks:
+                  match = re.search(r'/runs/(\d+)/', check.get('detailsUrl', ''))
+                  if not match:
+                      continue
+                  event = json.loads(subprocess.check_output([
+                      'gh', 'run', 'view', match.group(1), '--repo', repo, '--json', 'event'
+                  ], text=True)).get('event')
+                  name = check.get('name', '')
+                  if event == 'pull_request' and name != 'promote-feature-to-release':
+                      relevant.append(check)
+
+              failed = sum(1 for check in relevant if check.get('status') == 'COMPLETED' and check.get('conclusion') not in (None, '', 'SUCCESS', 'SKIPPED', 'NEUTRAL'))
+              pending = sum(1 for check in relevant if check.get('status') != 'COMPLETED')
+              print(json.dumps({'total': len(relevant), 'pending': pending, 'failed': failed}, ensure_ascii=False))
+              PY
+            )
             TOTAL=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["total"])')
             PENDING=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["pending"])')
             FAILED=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["failed"])')
 
-            echo "PR #$PR_NUMBER required PR checks => total:$TOTAL pending:$PENDING failed:$FAILED"
+            echo "PR #$PR_NUMBER mergeable:$MERGEABLE mergeState:$MERGE_STATE required PR checks => total:$TOTAL pending:$PENDING failed:$FAILED"
 
             if [ "$FAILED" != "0" ]; then
               echo "PR #$PR_NUMBER has failing required PR checks"
-              gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup
+              echo "$PR_JSON"
               exit 1
             fi
 
-            if [ "$TOTAL" != "0" ] && [ "$PENDING" = "0" ]; then
+            if [ "$TOTAL" = "0" ]; then
+              echo "No pull_request-scoped checks detected yet; continue waiting"
+              sleep 10
+              continue
+            fi
+
+            if [ "$PENDING" = "0" ]; then
               gh pr merge "$PR_NUMBER" --repo "$REPO" --rebase --delete-branch=false || \
-              gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch=false || \
-              gh pr merge "$PR_NUMBER" --repo "$REPO" --merge --delete-branch=false || { echo "All merge strategies failed"; exit 1; }
+              gh pr merge "$PR_NUMBER" --repo "$REPO" --squash --delete-branch=false || { echo "All merge strategies failed"; exit 1; }
               exit 0
             fi
 
