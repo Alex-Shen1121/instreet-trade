@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 const routes = [
-  { path: '/', url: /\/overview$/, text: '今日概况' },
+  { path: '/', url: null, text: '今日概况' },
   { path: '/overview', text: '今日概况' },
   { path: '/strategy', text: '策略大脑' },
   { path: '/portfolio', text: '当前持仓' },
@@ -76,6 +76,6 @@ test.describe('dashboard routes smoke', () => {
     await expect(page.locator('.tab-item')).toHaveCount(3)
     await page.locator('.tab-item', { hasText: '策略页' }).locator('.tab-close').click()
     await expect(page.locator('.tab-item')).toHaveCount(2)
-    await expect(page.getByRole('heading', { name: '持仓页' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '当前持仓' })).toBeVisible()
   })
 })

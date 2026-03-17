@@ -88,6 +88,14 @@ const NAV_ITEMS = [
   { to: '/config', label: '配置页', desc: '策略参数 / 大策略' },
 ]
 
+function normalizeTabPath(pathname) {
+  return NAV_ITEMS.find((item) => item.to === pathname)?.to || '/overview'
+}
+
+function getTabLabel(pathname) {
+  return NAV_ITEMS.find((item) => item.to === pathname)?.label || '总览'
+}
+
 const MANIFEST_SECTION_DEFS = [
   {
     key: 'dynamic_focus',
@@ -402,7 +410,8 @@ function routeToPageKey(pathname) {
 
 function useDashboardData(pathname) {
   const pageKey = routeToPageKey(pathname)
-  const [pageData, setPageData] = useState(null)
+  const [pageCache, setPageCache] = useState({})
+  const [shellData, setShellData] = useState(null)
   const [configData, setConfigData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [pageLoading, setPageLoading] = useState(false)
@@ -418,7 +427,8 @@ function useDashboardData(pathname) {
       else setPageLoading(true)
       const res = await fetch(`/api/pages/${currentPage}`)
       const json = await readApiResponse(res)
-      setPageData(json)
+      setPageCache((prev) => ({ ...prev, [currentPage]: json }))
+      setShellData(json)
       setError('')
     } catch (err) {
       setError(err.message || '页面数据加载失败')
@@ -442,11 +452,13 @@ function useDashboardData(pathname) {
     }
   }, [])
 
+  const activePageData = pageCache[pageKey] || null
+
   useEffect(() => {
-    loadPage(pageKey, true)
+    loadPage(pageKey, !activePageData && !shellData)
     const timer = setInterval(() => loadPage(pageKey), 30000)
     return () => clearInterval(timer)
-  }, [pageKey, loadPage])
+  }, [pageKey, loadPage, activePageData, shellData])
 
   useEffect(() => {
     if (pageKey === 'config') loadConfig()
@@ -488,7 +500,8 @@ function useDashboardData(pathname) {
   }
 
   return {
-    pageData,
+    pageData: activePageData,
+    shellData,
     configData,
     loading,
     pageLoading,
@@ -1305,11 +1318,15 @@ function ConfigPage({ configData, configLoading, configError, saveMessage, savin
 }
 
 function App() {
-  const [tabs, setTabs] = useState([{ path: '/overview', label: '总览' }])
-  const [activeTab, setActiveTab] = useState('/overview')
+  const [tabs, setTabs] = useState(() => {
+    const initialPath = normalizeTabPath(window.location.pathname)
+    return [{ path: initialPath, label: getTabLabel(initialPath) }]
+  })
+  const [activeTab, setActiveTab] = useState(() => normalizeTabPath(window.location.pathname))
 
   const {
     pageData,
+    shellData,
     configData,
     loading,
     pageLoading,
@@ -1324,64 +1341,79 @@ function App() {
     updateProfile,
     updateActiveProfile,
   } = useDashboardData(activeTab)
-  const vm = pageData
 
   const openTab = useCallback((path, label) => {
+    const normalizedPath = normalizeTabPath(path)
+    const normalizedLabel = label || getTabLabel(normalizedPath)
     setTabs((prev) => {
-      const existing = prev.find((t) => t.path === path)
-      if (existing) {
-        setActiveTab(path)
-        return prev
-      }
-      return [...prev, { path, label }]
+      const existing = prev.find((t) => t.path === normalizedPath)
+      if (existing) return prev
+      return [...prev, { path: normalizedPath, label: normalizedLabel }]
     })
-    setActiveTab(path)
+    setActiveTab(normalizedPath)
+    window.history.replaceState(null, '', normalizedPath)
   }, [])
 
   const closeTab = useCallback((path, e) => {
     e?.stopPropagation()
     setTabs((prev) => {
+      if (prev.length === 1) return prev
       const newTabs = prev.filter((t) => t.path !== path)
       if (activeTab === path && newTabs.length > 0) {
         const idx = prev.findIndex((t) => t.path === path)
         const newActive = newTabs[Math.max(0, idx - 1)]?.path || newTabs[0]?.path
         setActiveTab(newActive)
+        window.history.replaceState(null, '', newActive)
       }
       return newTabs
     })
   }, [activeTab])
 
-  if (loading) return <div className="screen-state">正在加载 dashboard...</div>
-  if (error || !vm) return <div className="screen-state error-state">加载失败：{error || '未知错误'}</div>
+  useEffect(() => {
+    if (window.location.pathname === '/' && activeTab === '/overview') {
+      window.history.replaceState(null, '', '/overview')
+    }
+  }, [activeTab])
+
+  if (loading && !shellData) return <div className="screen-state">正在加载 dashboard...</div>
+
+  const shellVm = pageData || shellData
+  if (!shellVm) return <div className="screen-state error-state">加载失败：{error || '未知错误'}</div>
 
   const renderPage = () => {
+    if (activeTab === '/config') {
+      return <ConfigPage configData={configData} configLoading={configLoading} configError={configError} saveMessage={saveMessage} saving={saving} onRefresh={refreshConfig} onUpdateManifest={updateManifest} onUpdateProfile={updateProfile} onUpdateActiveProfile={updateActiveProfile} />
+    }
+
+    if (!pageData) {
+      return <div className="content-loading-state">正在加载 {getTabLabel(activeTab)}…</div>
+    }
+
     switch (activeTab) {
       case '/overview':
-        return <OverviewPage vm={vm} />
+        return <OverviewPage vm={pageData} />
       case '/strategy':
-        return <StrategyPage vm={vm} />
+        return <StrategyPage vm={pageData} />
       case '/portfolio':
-        return <PortfolioPage vm={vm} />
+        return <PortfolioPage vm={pageData} />
       case '/validation':
-        return <ValidationPage vm={vm} />
+        return <ValidationPage vm={pageData} />
       case '/history':
-        return <HistoryPage vm={vm} />
-      case '/config':
-        return <ConfigPage configData={configData} configLoading={configLoading} configError={configError} saveMessage={saveMessage} saving={saving} onRefresh={refreshConfig} onUpdateManifest={updateManifest} onUpdateProfile={updateProfile} onUpdateActiveProfile={updateActiveProfile} />
+        return <HistoryPage vm={pageData} />
       default:
-        return <OverviewPage vm={vm} />
+        return <OverviewPage vm={pageData} />
     }
   }
 
   return (
     <Layout
-      vm={vm}
+      vm={shellVm}
       tabs={tabs}
       activeTab={activeTab}
       onOpenTab={openTab}
       onCloseTab={closeTab}
       pageLoading={pageLoading}
-      pageError={vm.summary?.fallbackReason || error}
+      pageError={pageData?.summary?.fallbackReason || shellVm.summary?.fallbackReason || error}
       refreshPage={refreshPage}
     >
       {renderPage()}
