@@ -14,6 +14,7 @@ test('GET /api/pages/overview returns overview-only payload', async () => {
 
   assert.ok(data.summary)
   assert.ok(data.links)
+  assert.ok(typeof data.alertLayer === 'object')
   assert.equal('signal' in data, false)
   assert.equal('history' in data, false)
   assert.equal('holdings' in data, false)
@@ -25,6 +26,7 @@ test('GET /api/pages/strategy returns strategy payload', async () => {
   assert.ok(data.summary)
   assert.ok(typeof data.signal === 'object')
   assert.ok(typeof data.dynamicFocus === 'object')
+  assert.ok(typeof data.alertLayer === 'object')
   assert.ok(typeof data.diagnostics === 'object')
   assert.ok(typeof data.portfolio === 'object')
   assert.ok(typeof data.portfolio.riskControls === 'object')
@@ -57,6 +59,7 @@ test('GET /api/pages/history returns history payload', async () => {
   assert.ok(typeof data.history === 'object')
   assert.ok(Array.isArray(data.trades))
   assert.ok(Array.isArray(data.news))
+  assert.ok(typeof data.alertLayer === 'object')
   assert.equal(typeof data.latestPostContent, 'string')
   assert.equal(typeof data.latestLogPreview, 'string')
 })

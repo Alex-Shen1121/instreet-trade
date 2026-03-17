@@ -1,3 +1,4 @@
+import fs from 'fs';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -112,10 +113,11 @@ app.get('/api/validation-report', (_req, res) => {
   res.json(data.validationReport || { error: 'no validation report yet' });
 });
 
-if (process.env.NODE_ENV === 'production') {
+const distIndexPath = path.join(distDir, 'index.html');
+if (fs.existsSync(distIndexPath)) {
   app.use(express.static(distDir));
   app.get(/^(?!\/api).*/, (_req, res) => {
-    res.sendFile(path.join(distDir, 'index.html'));
+    res.sendFile(distIndexPath);
   });
 }
 

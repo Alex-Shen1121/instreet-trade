@@ -28,6 +28,8 @@ test('GET /api/overview returns stable core shape', async () => {
   assert.ok('strategyState' in data.summary)
   assert.ok('marketRegime' in data.summary)
   assert.ok('pendingTrades' in data.summary)
+  assert.ok('alertTotal' in data.summary)
+  assert.ok('criticalAlerts' in data.summary)
 
   assert.ok(data.portfolio)
   assert.equal(typeof data.portfolio, 'object')
@@ -40,6 +42,7 @@ test('GET /api/overview returns stable core shape', async () => {
   assert.ok(typeof data.latestRun.state === 'object')
   assert.ok(typeof data.latestRun.dynamicFocus === 'object')
   assert.ok(typeof data.latestRun.strategySignal === 'object')
+  assert.ok(typeof data.latestRun.alertLayer === 'object')
   assert.ok(typeof data.latestRun.diagnostics === 'object')
 
   assert.ok(data.history)

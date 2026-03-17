@@ -16,6 +16,7 @@ const paths = {
   switchGate: path.join(WORKSPACE, '.instreet_switch_gate.json'),
   acceptanceState: path.join(WORKSPACE, '.instreet_acceptance_state.json'),
   sellState: path.join(WORKSPACE, '.instreet_sell_state.json'),
+  alerts: path.join(WORKSPACE, '.instreet_alerts.json'),
   alertState: path.join(WORKSPACE, '.instreet_alert_state.json'),
   postRetryQueue: path.join(WORKSPACE, '.instreet_post_retry_queue.json'),
   switchEvaluations: path.join(WORKSPACE, '.instreet_switch_evaluations.json'),
@@ -55,6 +56,7 @@ const ALLOWED_PROFILE_KEYS = new Set([
   'correlation_groups',
   'watchlist',
   'quote_focus_symbols',
+  'alert_rules',
 ]);
 
 function exists(filePath) {
@@ -261,6 +263,7 @@ function buildCompletedFeatures() {
     { key: 'signal', title: '策略切换状态机', desc: '支持 observe_switch / switch_ready / rollback_watch', status: 'done' },
     { key: 'validation', title: 'dry-run / replay 验证', desc: '支持只跑决策链和基于审计快照重放', status: 'done' },
     { key: 'candidate-discovery', title: '动态候选发现池', desc: '在固定白名单外，结合榜单、交易和新闻补充事件池候选', status: 'done' },
+    { key: 'alert-layer', title: '盘中 / 巡检预警层', desc: '持仓 + 候选池预警，含涨跌幅、量能、MA/MACD/RSI、回撤保护、共振与冷却去重', status: 'done' },
     { key: 'sell-state', title: '卖出状态机', desc: '卖出不再只看单次阈值，支持连续信号确认与恢复', status: 'done' },
     { key: 'audit', title: '审计快照', desc: '每轮保存 inputs / outputs / llm prompt-response', status: 'done' },
     { key: 'logs', title: '独立日志切分', desc: '每次运行单独日志文件，不再混写到一个文件', status: 'done' },
@@ -323,6 +326,10 @@ function buildConfigMeta() {
       news_discovery_weight: '新闻发现权重：新闻标题命中事件池候选时的附加权重。',
       confirm_runs_trim: '减仓确认轮数：连续多少轮触发后，系统才正式执行减仓。',
       confirm_runs_exit: '清仓确认轮数：连续多少轮触发后，系统才正式执行清仓。',
+      max_alerts_per_scope: '每个范围最多展示多少条预警：分别限制持仓预警和候选池预警的卡片数量。',
+      min_resonance_count: '共振最少条件数：至少命中多少条规则后，才把多条件共振视为正式预警。',
+      drawdown_from_peak: '浮盈回撤保护：持仓从阶段高点回撤超过该比例时，进入保护性预警。',
+      candidate_min_score: '候选池最低分：候选股至少达到这个分数，技术预警才进入重点展示。',
       bucket_targets: '目标仓位：系统希望长期维持的 bucket 理想占比。',
       bucket_minimums: '最低配置：某些关键 bucket 至少应保留的底仓比例。',
     },
@@ -400,6 +407,7 @@ export function getDashboardData() {
   const switchEvaluations = readJson(paths.switchEvaluations, []);
   const acceptanceState = readJson(paths.acceptanceState, {});
   const sellState = readJson(paths.sellState, {});
+  const alerts = readJson(paths.alerts, {});
   const alertState = readJson(paths.alertState, {});
   const postRetryQueue = readJson(paths.postRetryQueue, {});
   const validationReport = readJson(paths.validationReport, {});
@@ -419,7 +427,7 @@ export function getDashboardData() {
   const baseBundle = latestAuditOutputs?.base_bundle || {};
   const overlayBaseBundle = overlayAuditOutputs?.base_bundle || baseBundle;
   const latestTrades = latestAudit?.inputs?.trades_data?.data?.trades || [];
-  const latestAlertLayer = baseBundle?.alert_layer || state?.alert_layer || alertState?.last_snapshot || {};
+  const latestAlertLayer = baseBundle?.alert_layer || latestAuditOutputs?.alert_layer || state?.alert_layer || alerts || alertState?.last_snapshot || {};
   const selectedRunAt = getAuditRunAt(latestAudit, state?.last_mode === 'live' ? state?.last_run_at : null);
   const executionSummary = buildExecutionSummary(latestAuditOutputs);
   const effectiveDynamicFocus = latestAuditOutputs?.dynamic_focus || dynamicFocus || {};
@@ -438,6 +446,7 @@ export function getDashboardData() {
       lastPostUrl: state?.last_post_url || null,
       latestAuditPath: latestAuditSelection?.filePath || state?.last_audit_run_path || null,
       latestLogPath: latestLogPath || null,
+      latestAlertsPath: state?.alerts_path || paths.alerts,
       tradeLogWiki: state?.last_trade_log_doc_url || TRADE_LOG_WIKI,
       tradeLogRootWiki: TRADE_LOG_WIKI,
       overviewWiki: OVERVIEW_WIKI,
@@ -501,6 +510,7 @@ export function getDashboardData() {
         exitCandidates: baseBundle?.exit_candidates || [],
         buySkipReasons: baseBundle?.buy_skip_reasons || [],
         sellState: baseBundle?.sell_state || sellState || {},
+        protectionWatchlist: baseBundle?.protection_watchlist || [],
         alertLayer: latestAlertLayer,
         regimeFeatures: effectiveDynamicFocus?.regime_features || {},
         rebalanceNeeded: baseBundle?.rebalance_needed || false,
@@ -564,6 +574,7 @@ function buildCommonPageVm(snapshot, liveData, liveError = '') {
     completedFeatures: snapshot.completedFeatures,
     signal: snapshot.latestRun?.strategySignal || {},
     dynamicFocus: snapshot.latestRun?.dynamicFocus || {},
+    alertLayer: snapshot.latestRun?.alertLayer || {},
     diagnostics: snapshot.latestRun?.diagnostics || {},
     portfolio: {
       ...(snapshot.portfolio || {}),
@@ -617,12 +628,14 @@ export async function getPageData(page) {
       return {
         summary: common.summary,
         links: common.links,
+        alertLayer: common.alertLayer,
       };
     case 'strategy':
       return {
         summary: common.summary,
         signal: common.signal,
         dynamicFocus: common.dynamicFocus,
+        alertLayer: common.alertLayer,
         diagnostics: common.diagnostics,
         portfolio: { riskControls: snapshot?.portfolio?.riskControls || {} },
       };
@@ -645,6 +658,7 @@ export async function getPageData(page) {
         history: common.history,
         trades: common.trades,
         news: common.news,
+        alertLayer: common.alertLayer,
         latestPostContent: common.latestPostContent,
         latestLogPreview: common.latestLogPreview,
       };

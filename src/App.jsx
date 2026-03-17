@@ -37,6 +37,18 @@ const LABELS = {
     ready_to_exit: '已满足清仓条件',
     recovering: '恢复观察中',
   },
+  alertLevel: {
+    critical: '高危预警',
+    warning: '重点预警',
+    info: '观察提醒',
+  },
+  alertDirection: {
+    risk: '风险',
+    opportunity: '机会',
+    mixed: '分化',
+    bearish: '风险',
+    bullish: '机会',
+  },
   regime: {
     risk_off: '偏防守市场',
     balanced: '均衡市场',
@@ -224,6 +236,18 @@ const MANIFEST_SECTION_DEFS = [
     ],
   },
   {
+    key: 'alert_layer',
+    title: '预警层引擎',
+    subtitle: '控制持仓 + 候选池预警的冷却、展示上限和共振门槛。',
+    fields: [
+      { path: 'enabled', label: '启用预警层', type: 'boolean' },
+      { path: 'cooldown_minutes', label: '冷却去重分钟数', type: 'number', help: '同一标的相同类型预警在冷却期内不重复提醒。' },
+      { path: 'max_alerts_per_scope', label: '每个范围最多展示预警数', type: 'number', help: '持仓和候选池分别保留多少条预警。' },
+      { path: 'min_resonance_count', label: '最少共振条件数', type: 'number', help: '至少命中多少条规则后，才视为多条件共振。' },
+      { path: 'notify_in_summary', label: '在巡检摘要中展示预警统计', type: 'boolean' },
+    ],
+  },
+  {
     key: 'execution_hygiene',
     title: '执行卫生',
     subtitle: '控制交易冷静期与来回反手约束。',
@@ -338,6 +362,19 @@ const PROFILE_SECTION_DEFS = [
       { path: 'candidate_pool.layer_weights.event', label: '事件池权重', type: 'number' },
     ],
   },
+  {
+    key: 'alert_rules',
+    title: '预警阈值模板',
+    subtitle: '控制涨跌幅、量能、回撤保护和候选池触发门槛。',
+    fields: [
+      { path: 'alert_rules.holding_price_up', label: '持仓上冲阈值', type: 'number' },
+      { path: 'alert_rules.holding_price_down', label: '持仓下跌阈值', type: 'number' },
+      { path: 'alert_rules.candidate_price_up', label: '候选池突破阈值', type: 'number' },
+      { path: 'alert_rules.volume_ratio_hot', label: '放量阈值', type: 'number' },
+      { path: 'alert_rules.drawdown_from_peak', label: '浮盈回撤保护阈值', type: 'number', help: '持仓相对阶段峰值回撤超过这个比例时触发保护预警。' },
+      { path: 'alert_rules.candidate_min_score', label: '候选池最低分', type: 'number', help: '候选股至少达到这个分数，技术预警才进入重点展示。' },
+    ],
+  },
 ]
 
 function fmtMoney(value) {
@@ -371,6 +408,12 @@ function toneForState(state) {
   if (state === 'switch_ready') return 'green'
   if (state === 'observe_switch') return 'amber'
   if (state === 'rollback_watch') return 'red'
+  return 'blue'
+}
+
+function toneForAlert(level) {
+  if (level === 'critical') return 'red'
+  if (level === 'warning') return 'amber'
   return 'blue'
 }
 
@@ -425,6 +468,38 @@ function Table({ columns, rows, rowKey }) {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function AlertFeed({ alerts = [], emptyText = '当前没有预警' }) {
+  if (!alerts.length) return <div className="subline">{emptyText}</div>
+  return (
+    <div className="focus-stack">
+      {alerts.map((item, idx) => (
+        <article key={`${item.symbol || idx}-${idx}`} className="focus-card">
+          <div className="focus-head">
+            <strong>{item.name}</strong>
+            <div className="alert-badges-inline">
+              <Badge tone={toneForAlert(item.level)}>{mapLabel('alertLevel', item.level, item.level)}</Badge>
+              <Badge tone={item.direction === 'risk' || item.direction === 'bearish' ? 'red' : item.direction === 'opportunity' || item.direction === 'bullish' ? 'green' : 'blue'}>
+                {mapLabel('alertDirection', item.direction, item.direction)}
+              </Badge>
+            </div>
+          </div>
+          <p>{item.headline || item.summary}</p>
+          <div className="subline">{item.symbol} / {item.scope === 'holding' ? '持仓' : '候选池'} / 共振 {item.resonance_count ?? '—'} 项</div>
+          {item.conditions?.length ? (
+            <div className="chips vertical top-space">
+              {item.conditions.slice(0, 4).map((condition, conditionIdx) => (
+                <span key={`${item.symbol}-${conditionIdx}`} className={`chip ${condition.direction === 'risk' || condition.direction === 'bearish' ? 'chip-danger' : 'chip-primary'}`}>
+                  {condition.text}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </article>
+      ))}
     </div>
   )
 }
@@ -711,6 +786,9 @@ function Layout({ vm, tabs, activeTab, onOpenTab, onCloseTab, onCloseOtherTabs, 
 }
 
 function OverviewPage({ vm }) {
+  const alertLayer = vm.alertLayer || {}
+  const alertSummary = alertLayer.summary || {}
+
   return (
     <>
       <header className="hero-v2">
@@ -760,6 +838,8 @@ function OverviewPage({ vm }) {
         <StatCard label="可用现金" value={fmtMoney(vm.summary.cash)} hint={`持仓市值 ${fmtMoney(vm.summary.holdingsValue)}`} tone="cyan" />
         <StatCard label="持仓市值" value={fmtMoney(vm.summary.holdingsValue)} hint={`当前待成交 ${vm.summary.pendingTrades || 0} 笔`} tone="green" />
         <StatCard label="待成交订单" value={vm.summary.pendingTrades || 0} hint="仅在接口失败时回退到最近一次可用结果" tone="amber" />
+        <StatCard label="当前预警数" value={vm.summary.alertTotal || 0} hint={`高危 ${vm.summary.criticalAlerts || 0} / 重点 ${vm.summary.warningAlerts || 0}`} tone="red" />
+        <StatCard label="共振预警" value={alertSummary.resonance_count || 0} hint={`冷却去重压掉 ${alertSummary.suppressed_count || 0} 条`} tone="purple" />
       </section>
 
       <div className="page-grid two-col">
@@ -801,6 +881,25 @@ function OverviewPage({ vm }) {
           </div>
         </Card>
       </div>
+
+      <div className="page-grid two-col">
+        <Card>
+          <SectionHeader title="盘中 / 巡检预警摘要" subtitle="这一层只报警，不直接改交易动作" extra={<Badge tone={toneForAlert(vm.summary.criticalAlerts ? 'critical' : vm.summary.warningAlerts ? 'warning' : 'info')}>{vm.summary.alertTotal || 0} 条</Badge>} />
+          <div className="kv-list compact">
+            <div><span>高危预警</span><strong>{vm.summary.criticalAlerts || 0}</strong></div>
+            <div><span>重点预警</span><strong>{vm.summary.warningAlerts || 0}</strong></div>
+            <div><span>观察提醒</span><strong>{vm.summary.infoAlerts || 0}</strong></div>
+            <div><span>持仓预警</span><strong>{alertSummary.holding_count || 0}</strong></div>
+            <div><span>候选池预警</span><strong>{alertSummary.candidate_count || 0}</strong></div>
+            <div><span>冷却去重压掉</span><strong>{alertSummary.suppressed_count || 0}</strong></div>
+          </div>
+        </Card>
+
+        <Card>
+          <SectionHeader title="预警高亮" subtitle="优先展示最近一轮最值得盯的几条" />
+          <AlertFeed alerts={(alertLayer.alerts || []).slice(0, 3)} emptyText="当前没有高优先级预警" />
+        </Card>
+      </div>
     </>
   )
 }
@@ -812,8 +911,11 @@ function StrategyPage({ vm }) {
   const scoredCandidates = vm.diagnostics?.scoredCandidates || []
   const exitCandidates = vm.diagnostics?.exitCandidates || []
   const sellStateRows = Object.entries(vm.diagnostics?.sellState?.symbols || {}).map(([symbol, row]) => ({ symbol, ...row }))
+  const protectionWatchlist = vm.diagnostics?.protectionWatchlist || []
   const technicalOverlay = vm.diagnostics?.technicalOverlay || {}
   const marketSentimentOverlay = vm.diagnostics?.marketSentimentOverlay || {}
+  const alertLayer = vm.alertLayer || vm.diagnostics?.alertLayer || {}
+  const alertSummary = alertLayer.summary || {}
   const overlaySourceRunAt = vm.diagnostics?.overlaySourceRunAt || vm.summary?.lastRunAt
 
   return (
@@ -836,6 +938,8 @@ function StrategyPage({ vm }) {
           <div className="mini-card"><div className="mini-label">建议切换</div><strong>{mapLabel('profile', vm.signal.last_suggested_profile, vm.signal.last_suggested_profile || '无')}</strong></div>
           <div className="mini-card"><div className="mini-label">连续信号</div><strong>{vm.signal.consecutive_same_suggestion || 0} / {vm.signal.switch_signal_threshold || 0}</strong></div>
           <div className="mini-card"><div className="mini-label">Pending 资金冻结</div><strong>{fmtMoney(pendingContext.reserved_cash)}</strong></div>
+          <div className="mini-card"><div className="mini-label">预警总数</div><strong>{vm.summary.alertTotal || 0}</strong></div>
+          <div className="mini-card"><div className="mini-label">高危 / 重点</div><strong>{vm.summary.criticalAlerts || 0} / {vm.summary.warningAlerts || 0}</strong></div>
         </div>
       </Card>
 
@@ -899,12 +1003,26 @@ function StrategyPage({ vm }) {
 
       <div className="page-grid two-col">
         <Card>
-          <SectionHeader title="候选归因 Top 3" subtitle="为什么系统认为这些股票值得买，看打分拆解而不是只看总分" />
+          <SectionHeader title="持仓预警" subtitle="先盯持仓里的风险 / 机会共振" extra={<Badge tone={toneForAlert(vm.summary.criticalAlerts ? 'critical' : vm.summary.warningAlerts ? 'warning' : 'info')}>{alertSummary.holding_count || 0} 条</Badge>} />
+          <AlertFeed alerts={(alertLayer.holding_alerts || []).slice(0, 6)} emptyText="当前持仓没有新的预警" />
+        </Card>
+
+        <Card>
+          <SectionHeader title="候选池预警" subtitle="这些票先报警，不直接改买卖动作" extra={<Badge tone="blue">{alertSummary.candidate_count || 0} 条</Badge>} />
+          <AlertFeed alerts={(alertLayer.candidate_alerts || []).slice(0, 6)} emptyText="当前候选池没有新的预警" />
+        </Card>
+      </div>
+
+      <div className="page-grid two-col">
+        <Card>
+          <SectionHeader title="候选归因 Top 3" subtitle="为什么系统认为这些股票值得买；预警层现在会对候选分数做轻微校准" />
           <div className="focus-stack">
             {scoredCandidates.slice(0, 3).map((item) => (
               <article key={item.symbol} className="focus-card">
                 <div className="focus-head"><strong>{item.name}</strong><span>{item.symbol} / 总分 {item.score}</span></div>
                 <p>{mapLabel('bucket', item.bucket, item.bucket)} · {mapLabel('layer', item.layer, item.layer)}</p>
+                {item.raw_score !== undefined ? <p className="subline">原始分 {item.raw_score} / 预警层调整 {item.alert_adjustment > 0 ? '+' : ''}{item.alert_adjustment || 0}</p> : null}
+                {item.alert_adjustment_reasons?.length ? <div className="chips">{item.alert_adjustment_reasons.map((reason, idx) => <span key={`${item.symbol}-alert-${idx}`} className={`chip ${(item.alert_adjustment || 0) >= 0 ? 'chip-primary' : 'chip-danger'}`}>{reason}</span>)}</div> : null}
                 <div className="chips vertical">
                   {(item.score_breakdown || []).slice(0, 5).map((part, idx) => (
                     <span key={`${item.symbol}-${idx}`} className={`chip ${part.delta >= 0 ? 'chip-primary' : 'chip-danger'}`}>{part.label}: {part.delta > 0 ? '+' : ''}{part.delta}</span>
@@ -917,15 +1035,22 @@ function StrategyPage({ vm }) {
         </Card>
 
         <Card>
-          <SectionHeader title="卖出状态机" subtitle="卖出不再只靠单次阈值，下面展示每个标的目前处在哪个状态" />
+          <SectionHeader title="卖出状态机 / 保护观察" subtitle="高危持仓预警会优先进入保护观察，先限制扩仓，再决定是否推进卖出链路" />
           <div className="focus-stack">
+            {protectionWatchlist.slice(0, 4).map((item) => (
+              <article key={`protect-${item.symbol}`} className="focus-card">
+                <div className="focus-head"><strong>{item.name}</strong><Badge tone="red">保护观察</Badge></div>
+                <p>{item.headline}</p>
+                <div className="subline">{item.summary}</div>
+              </article>
+            ))}
             {sellStateRows.slice(0, 6).map((item) => (
               <article key={item.symbol} className="focus-card">
                 <div className="focus-head"><strong>{item.symbol}</strong><Badge tone={item.state?.includes('ready') ? 'red' : 'amber'}>{mapLabel('sellState', item.state, item.state)}</Badge></div>
                 <p>主因：{item.primary_reason_kind || '暂无'} / 连续触发：{item.trigger_streak || 0} / 要求：{item.required_runs || 0}</p>
               </article>
             ))}
-            {!sellStateRows.length ? <div className="subline">当前没有处于卖出观察链路的标的</div> : null}
+            {!protectionWatchlist.length && !sellStateRows.length ? <div className="subline">当前没有处于卖出观察链路的标的</div> : null}
           </div>
         </Card>
       </div>
@@ -1129,7 +1254,11 @@ function HistoryPage({ vm }) {
         </Card>
       </div>
 
-      <div className="page-grid two-col">
+      <div className="page-grid three-col">
+        <Card>
+          <SectionHeader title="最近预警" subtitle="保留最新一轮预警快照，便于复盘" />
+          <AlertFeed alerts={(vm.alertLayer?.alerts || []).slice(0, 6)} emptyText="当前没有预警快照" />
+        </Card>
         <Card>
           <SectionHeader title="最新日志尾部" subtitle="适合快速排查问题" />
           <pre className="console-block">{vm.latestLogPreview || '暂无日志'}</pre>
