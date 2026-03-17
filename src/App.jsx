@@ -745,6 +745,13 @@ function OverviewPage({ vm }) {
             <strong>{vm.summary.latestExecutionLabel || '暂无'}</strong>
             <small>{vm.summary.latestExecutionDetail || '暂无'}</small>
           </div>
+          {vm.summary.alertTotal > 0 ? (
+            <div className="hero-status-card">
+              <span>预警</span>
+              <strong className={vm.summary.criticalAlerts > 0 ? 'text-red' : (vm.summary.warningAlerts > 0 ? 'text-amber' : '')}>{vm.summary.alertTotal} 条</strong>
+              <small>Critical {vm.summary.criticalAlerts} / Warning {vm.summary.warningAlerts}</small>
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -923,9 +930,9 @@ function StrategyPage({ vm }) {
         </Card>
       </div>
 
-      {(technicalOverlay?.items && Object.keys(technicalOverlay.items).length > 0) || (marketSentimentOverlay?.items && Object.keys(marketSentimentOverlay.items).length > 0) ? (
+      {(technicalOverlay?.items && Object.keys(technicalOverlay.items).length > 0) || (marketSentimentOverlay?.items && Object.keys(marketSentimentOverlay.items).length > 0) || (vm.diagnostics?.alertLayer?.alerts?.length > 0) ? (
         <Card>
-          <SectionHeader title="技术面 / 资金流补充" subtitle={`V2 新增：技术指标与资金流/龙虎榜解释层${overlaySourceRunAt ? ` · ${fmtTime(overlaySourceRunAt)}` : ''}`} />
+          <SectionHeader title="技术面 / 资金流 / 预警层" subtitle={`多条件共振预警层${overlaySourceRunAt ? ` · ${fmtTime(overlaySourceRunAt)}` : ''}`} />
           <div className="page-grid two-col">
             {technicalOverlay?.items && Object.keys(technicalOverlay.items).length > 0 ? (
               <div>
@@ -958,6 +965,26 @@ function StrategyPage({ vm }) {
               </div>
             ) : null}
           </div>
+          {vm.diagnostics?.alertLayer?.alerts?.length > 0 ? (
+            <div className="page-grid two-col top-space">
+              <div>
+                <h4>🔔 预警层（多条件共振 / 冷却去重）</h4>
+                <div className="stats-grid compact two-up top-space">
+                  <StatCard label="Critical" value={vm.diagnostics?.alertLayer?.summary?.critical || 0} tone="red" />
+                  <StatCard label="Warning" value={vm.diagnostics?.alertLayer?.summary?.warning || 0} tone="amber" />
+                </div>
+                <div className="focus-stack top-space">
+                  {vm.diagnostics.alertLayer.alerts.slice(0, 6).map((item) => (
+                    <article key={`${item.scope}-${item.symbol}`} className="focus-card">
+                      <div className="focus-head"><strong>{item.name}</strong><span>{item.symbol} / {item.scope}</span><Badge tone={item.level === 'critical' ? 'red' : (item.level === 'warning' ? 'amber' : 'blue')}>{item.level}</Badge></div>
+                      <p>{item.summary}</p>
+                      {item.conditions?.length ? <div className="chips vertical">{item.conditions.slice(0, 3).map((c, i) => <span key={i} className={`chip ${c.direction === 'bullish' ? 'chip-primary' : (c.direction === 'bearish' ? 'chip-danger' : '')}`}>{c.text}</span>)}</div> : null}
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </Card>
       ) : null}
 

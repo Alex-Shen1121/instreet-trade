@@ -16,6 +16,7 @@ const paths = {
   switchGate: path.join(WORKSPACE, '.instreet_switch_gate.json'),
   acceptanceState: path.join(WORKSPACE, '.instreet_acceptance_state.json'),
   sellState: path.join(WORKSPACE, '.instreet_sell_state.json'),
+  alertState: path.join(WORKSPACE, '.instreet_alert_state.json'),
   postRetryQueue: path.join(WORKSPACE, '.instreet_post_retry_queue.json'),
   switchEvaluations: path.join(WORKSPACE, '.instreet_switch_evaluations.json'),
   validationReport: path.join(WORKSPACE, '.instreet_v2_validation.json'),
@@ -32,6 +33,7 @@ const ALLOWED_MANIFEST_KEYS = new Set([
   'dynamic_focus',
   'community_signal',
   'news_filter',
+  'alert_layer',
   'execution_hygiene',
   'strategy_state_machine',
   'review_policy',
@@ -269,6 +271,7 @@ function buildCompletedFeatures() {
     { key: 'technical-overlay', title: '技术面增强层', desc: '引入 MA / MACD / RSI / 量能 / 乖离率，补充持仓与候选解释', status: 'done' },
     { key: 'moneyflow-dragon', title: '资金流 / 龙虎榜解释层', desc: '补充 dynamic_focus 与 LLM 复核的解释上下文，不直接做交易触发', status: 'done' },
     { key: 'v2-validation', title: 'V2 历史验证', desc: '基于历史 live audit 快照，对比 raw score 与 blended technical score', status: 'done' },
+    { key: 'alert-layer', title: '盘中预警层', desc: '持仓+候选多条件共振、分级预警、冷却去重、动态止盈保护', status: 'done' },
   ];
 }
 
@@ -397,6 +400,7 @@ export function getDashboardData() {
   const switchEvaluations = readJson(paths.switchEvaluations, []);
   const acceptanceState = readJson(paths.acceptanceState, {});
   const sellState = readJson(paths.sellState, {});
+  const alertState = readJson(paths.alertState, {});
   const postRetryQueue = readJson(paths.postRetryQueue, {});
   const validationReport = readJson(paths.validationReport, {});
   const auditFiles = listFiles(paths.auditDir, '.json');
@@ -415,6 +419,7 @@ export function getDashboardData() {
   const baseBundle = latestAuditOutputs?.base_bundle || {};
   const overlayBaseBundle = overlayAuditOutputs?.base_bundle || baseBundle;
   const latestTrades = latestAudit?.inputs?.trades_data?.data?.trades || [];
+  const latestAlertLayer = baseBundle?.alert_layer || state?.alert_layer || alertState?.last_snapshot || {};
   const selectedRunAt = getAuditRunAt(latestAudit, state?.last_mode === 'live' ? state?.last_run_at : null);
   const executionSummary = buildExecutionSummary(latestAuditOutputs);
   const effectiveDynamicFocus = latestAuditOutputs?.dynamic_focus || dynamicFocus || {};
@@ -453,6 +458,11 @@ export function getDashboardData() {
       marketRegime: effectiveDynamicFocus?.market_regime || 'unknown',
       strategyState: effectiveStrategySignal?.state || 'unknown',
       suggestedProfile: effectiveStrategySignal?.last_suggested_profile || null,
+      alertTotal: latestAlertLayer?.summary?.total || latestAlertLayer?.total || 0,
+      criticalAlerts: latestAlertLayer?.summary?.critical || latestAlertLayer?.critical || 0,
+      warningAlerts: latestAlertLayer?.summary?.warning || latestAlertLayer?.warning || 0,
+      infoAlerts: latestAlertLayer?.summary?.info || latestAlertLayer?.info || 0,
+      alertHighlights: latestAlertLayer?.summary?.highlights || latestAlertLayer?.highlights || [],
       totalValue: portfolio?.total_value ?? null,
       cash: portfolio?.cash ?? null,
       holdingsValue: portfolio?.holdings_value ?? null,
@@ -475,6 +485,7 @@ export function getDashboardData() {
       candidateState,
       acceptanceState,
       sellState,
+      alertLayer: latestAlertLayer,
       postRetryQueue,
       audit: latestAudit,
       news: latestNews,
@@ -490,6 +501,7 @@ export function getDashboardData() {
         exitCandidates: baseBundle?.exit_candidates || [],
         buySkipReasons: baseBundle?.buy_skip_reasons || [],
         sellState: baseBundle?.sell_state || sellState || {},
+        alertLayer: latestAlertLayer,
         regimeFeatures: effectiveDynamicFocus?.regime_features || {},
         rebalanceNeeded: baseBundle?.rebalance_needed || false,
         technicalOverlay: overlayBaseBundle?.technical_overlay || {},

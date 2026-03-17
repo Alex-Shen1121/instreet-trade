@@ -757,3 +757,8 @@ a { color: inherit; text-decoration: none; }
   }
   .sidebar-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+.text-red { color: #dc2626 !important; }
+.text-amber { color: #d97706 !important; }
+.top-space { margin-top: 16px; }
+
