@@ -238,12 +238,23 @@ const MANIFEST_SECTION_DEFS = [
   {
     key: 'alert_layer',
     title: '预警层引擎',
-    subtitle: '控制持仓 + 候选池预警的冷却、展示上限和共振门槛。',
+    subtitle: '控制持仓 + 候选池预警的冷却、展示上限、共振门槛，以及对卖出保护动作的耦合。',
     fields: [
       { path: 'enabled', label: '启用预警层', type: 'boolean' },
       { path: 'cooldown_minutes', label: '冷却去重分钟数', type: 'number', help: '同一标的相同类型预警在冷却期内不重复提醒。' },
+      { path: 'top_candidate_count', label: '纳入重点预警扫描的候选数', type: 'number' },
+      { path: 'max_items', label: '预警总展示上限', type: 'number' },
       { path: 'max_alerts_per_scope', label: '每个范围最多展示预警数', type: 'number', help: '持仓和候选池分别保留多少条预警。' },
       { path: 'min_resonance_count', label: '最少共振条件数', type: 'number', help: '至少命中多少条规则后，才视为多条件共振。' },
+      { path: 'resonance_warning_score', label: 'Warning 共振分阈值', type: 'number' },
+      { path: 'resonance_critical_score', label: 'Critical 共振分阈值', type: 'number' },
+      { path: 'candidate_min_score_floor', label: '候选池预警最低分地板', type: 'number' },
+      { path: 'profit_protect_trigger', label: '利润保护启动阈值', type: 'number' },
+      { path: 'profit_drawdown_warning', label: '利润回撤 Warning 阈值', type: 'number' },
+      { path: 'profit_drawdown_critical', label: '利润回撤 Critical 阈值', type: 'number' },
+      { path: 'allow_protective_trim', label: '允许预警层触发保护性减仓', type: 'boolean', help: '开启后，critical 持仓风险预警可在规则层直接提出保护性减仓。' },
+      { path: 'protective_trim_fraction', label: '保护性减仓比例', type: 'number' },
+      { path: 'protective_trim_profit_floor', label: '保护性减仓最低浮盈要求', type: 'number', help: '除非是回撤保护型预警，否则至少达到这个浮盈后才触发保护性减仓。' },
       { path: 'notify_in_summary', label: '在巡检摘要中展示预警统计', type: 'boolean' },
     ],
   },
@@ -365,14 +376,20 @@ const PROFILE_SECTION_DEFS = [
   {
     key: 'alert_rules',
     title: '预警阈值模板',
-    subtitle: '控制涨跌幅、量能、回撤保护和候选池触发门槛。',
+    subtitle: '控制涨跌幅、量能、回撤保护、均线偏离和候选池触发门槛。',
     fields: [
       { path: 'alert_rules.holding_price_up', label: '持仓上冲阈值', type: 'number' },
       { path: 'alert_rules.holding_price_down', label: '持仓下跌阈值', type: 'number' },
       { path: 'alert_rules.candidate_price_up', label: '候选池突破阈值', type: 'number' },
+      { path: 'alert_rules.candidate_price_down', label: '候选池走弱阈值', type: 'number' },
       { path: 'alert_rules.volume_ratio_hot', label: '放量阈值', type: 'number' },
+      { path: 'alert_rules.volume_ratio_cold', label: '缩量阈值', type: 'number' },
+      { path: 'alert_rules.drawdown_activation_profit', label: '回撤保护启动浮盈', type: 'number' },
       { path: 'alert_rules.drawdown_from_peak', label: '浮盈回撤保护阈值', type: 'number', help: '持仓相对阶段峰值回撤超过这个比例时触发保护预警。' },
+      { path: 'alert_rules.price_drawdown_from_peak', label: '价格回撤保护阈值', type: 'number' },
       { path: 'alert_rules.candidate_min_score', label: '候选池最低分', type: 'number', help: '候选股至少达到这个分数，技术预警才进入重点展示。' },
+      { path: 'alert_rules.ma_negative_bias_pct', label: '均线负乖离阈值', type: 'number' },
+      { path: 'alert_rules.ma_positive_bias_pct', label: '均线正乖离阈值', type: 'number' },
     ],
   },
 ]
@@ -884,7 +901,7 @@ function OverviewPage({ vm }) {
 
       <div className="page-grid two-col">
         <Card>
-          <SectionHeader title="盘中 / 巡检预警摘要" subtitle="这一层只报警，不直接改交易动作" extra={<Badge tone={toneForAlert(vm.summary.criticalAlerts ? 'critical' : vm.summary.warningAlerts ? 'warning' : 'info')}>{vm.summary.alertTotal || 0} 条</Badge>} />
+          <SectionHeader title="盘中 / 巡检预警摘要" subtitle="这一层先报警，再温和影响扩仓与保护动作" extra={<Badge tone={toneForAlert(vm.summary.criticalAlerts ? 'critical' : vm.summary.warningAlerts ? 'warning' : 'info')}>{vm.summary.alertTotal || 0} 条</Badge>} />
           <div className="kv-list compact">
             <div><span>高危预警</span><strong>{vm.summary.criticalAlerts || 0}</strong></div>
             <div><span>重点预警</span><strong>{vm.summary.warningAlerts || 0}</strong></div>
@@ -912,6 +929,7 @@ function StrategyPage({ vm }) {
   const exitCandidates = vm.diagnostics?.exitCandidates || []
   const sellStateRows = Object.entries(vm.diagnostics?.sellState?.symbols || {}).map(([symbol, row]) => ({ symbol, ...row }))
   const protectionWatchlist = vm.diagnostics?.protectionWatchlist || []
+  const protectiveSellCandidate = vm.diagnostics?.protectiveSellCandidate || null
   const technicalOverlay = vm.diagnostics?.technicalOverlay || {}
   const marketSentimentOverlay = vm.diagnostics?.marketSentimentOverlay || {}
   const alertLayer = vm.alertLayer || vm.diagnostics?.alertLayer || {}
@@ -941,6 +959,13 @@ function StrategyPage({ vm }) {
           <div className="mini-card"><div className="mini-label">预警总数</div><strong>{vm.summary.alertTotal || 0}</strong></div>
           <div className="mini-card"><div className="mini-label">高危 / 重点</div><strong>{vm.summary.criticalAlerts || 0} / {vm.summary.warningAlerts || 0}</strong></div>
         </div>
+        {protectiveSellCandidate ? (
+          <div className="side-card emphasis top-space no-shadow">
+            <div className="section-kicker">预警保护动作</div>
+            <p>{protectiveSellCandidate.name} 已进入保护性减仓候选，计划减 {protectiveSellCandidate.shares} 股。</p>
+            <div className="side-meta">{protectiveSellCandidate.alert?.headline} / 预计换手 {fmtPct(protectiveSellCandidate.projected_turnover)}</div>
+          </div>
+        ) : null}
       </Card>
 
       <div className="page-grid two-col">
@@ -1008,7 +1033,7 @@ function StrategyPage({ vm }) {
         </Card>
 
         <Card>
-          <SectionHeader title="候选池预警" subtitle="这些票先报警，不直接改买卖动作" extra={<Badge tone="blue">{alertSummary.candidate_count || 0} 条</Badge>} />
+          <SectionHeader title="候选池预警" subtitle="这些票先报警，并轻微影响买入打分与拦截逻辑" extra={<Badge tone="blue">{alertSummary.candidate_count || 0} 条</Badge>} />
           <AlertFeed alerts={(alertLayer.candidate_alerts || []).slice(0, 6)} emptyText="当前候选池没有新的预警" />
         </Card>
       </div>
