@@ -1376,6 +1376,68 @@ function ObjectNumberCard({ title, subtitle, source, helpMap = {}, onSave, savin
   )
 }
 
+function BucketThresholdCard({ title, subtitle, source, onSave, saving }) {
+  const families = ['defense', 'growth', 'cyclical', 'other']
+  const fields = [
+    { key: 'change_up', label: '上涨阈值' },
+    { key: 'change_down', label: '下跌阈值' },
+    { key: 'volume_ratio_surge', label: '放量阈值' },
+    { key: 'volume_ratio_drain', label: '缩量阈值' },
+    { key: 'gap_pct', label: '跳空阈值' },
+    { key: 'overbought_rsi', label: '超买 RSI' },
+    { key: 'oversold_rsi', label: '超卖 RSI' },
+  ]
+  const [draft, setDraft] = useState({})
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(source || {})
+  }, [source])
+
+  function updateCell(family, key, value) {
+    setDraft((prev) => ({
+      ...prev,
+      [family]: {
+        ...(prev?.[family] || {}),
+        [key]: value,
+      },
+    }))
+  }
+
+  async function handleSave() {
+    const patch = {}
+    families.forEach((family) => {
+      patch[family] = {}
+      fields.forEach((field) => {
+        patch[family][field.key] = Number(draft?.[family]?.[field.key] ?? 0)
+      })
+    })
+    await onSave(patch)
+  }
+
+  return (
+    <Card>
+      <SectionHeader title={title} subtitle={subtitle} />
+      <div className="stack-page">
+        {families.map((family) => (
+          <div key={family} className="side-card no-shadow">
+            <div className="section-kicker">{family}</div>
+            <div className="config-grid">
+              {fields.map((field) => (
+                <label key={`${family}-${field.key}`} className="config-field">
+                  <span className="config-label">{field.label}</span>
+                  <input type="number" step="0.01" value={draft?.[family]?.[field.key] ?? ''} onChange={(e) => updateCell(family, field.key, e.target.value)} />
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <button className="save-button" onClick={handleSave} disabled={saving}>{saving ? '保存中…' : '保存 bucket 预警阈值'}</button>
+    </Card>
+  )
+}
+
 function WatchlistCard({ title, subtitle, source, onSave, saving }) {
   const [draft, setDraft] = useState([])
 
@@ -1560,6 +1622,13 @@ function ConfigPage({ configData, configLoading, configError, saveMessage, savin
                 onSave={(patch) => onUpdateManifest({ [section.key]: patch })}
               />
             ))}
+            <BucketThresholdCard
+              title="预警 bucket 阈值矩阵"
+              subtitle="把 defense / growth / cyclical / other 四套预警敏感度拆开调，避免所有风格共用一套阈值。"
+              source={configData.manifest?.alert_layer?.bucket_thresholds}
+              saving={saving}
+              onSave={(patch) => onUpdateManifest({ alert_layer: { bucket_thresholds: patch } })}
+            />
           </div>
         </div>
       ) : null}
