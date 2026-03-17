@@ -645,16 +645,17 @@ function OverviewPage({ vm, liveError }) {
           </p>
           <div className="hero-links">
             {vm.links.lastPostUrl ? <a href={vm.links.lastPostUrl} target="_blank" rel="noreferrer">最新分析帖</a> : null}
-            <a href={vm.links.tradeLogWiki} target="_blank" rel="noreferrer">交易日志</a>
+            <a href={vm.links.tradeLogWiki} target="_blank" rel="noreferrer">本轮交易日志</a>
+            <a href={vm.links.tradeLogRootWiki} target="_blank" rel="noreferrer">交易日志目录</a>
             <a href={vm.links.overviewWiki} target="_blank" rel="noreferrer">持仓规划</a>
           </div>
         </div>
 
         <div className="hero-status-grid">
           <div className="hero-status-card bright">
-            <span>本地策略快照</span>
+            <span>最新 live 快照</span>
             <strong>{fmtAgo(vm.summary.freshness)}</strong>
-            <small>最近一轮：{fmtTime(vm.summary.lastRunAt)}</small>
+            <small>最近一轮 live：{fmtTime(vm.summary.lastRunAt)}</small>
           </div>
           <div className="hero-status-card">
             <span>实时 InStreet</span>
@@ -662,9 +663,9 @@ function OverviewPage({ vm, liveError }) {
             <small>{liveError || '每 60 秒自动刷新，可手动刷新'}</small>
           </div>
           <div className="hero-status-card">
-            <span>本轮结论</span>
-            <strong>{mapLabel('action', vm.summary.latestAction, vm.summary.latestAction)}</strong>
-            <small>{vm.summary.latestReason}</small>
+            <span>最新 live 决策</span>
+            <strong>{mapLabel('action', vm.summary.latestDecisionAction, vm.summary.latestDecisionAction)}</strong>
+            <small>{vm.summary.latestExecutionLabel} · {vm.summary.latestDecisionReason}</small>
           </div>
         </div>
       </header>
@@ -678,10 +679,13 @@ function OverviewPage({ vm, liveError }) {
 
       <div className="page-grid two-col">
         <Card>
-          <SectionHeader title="今日概况" subtitle="先看结论，再看细节" extra={<Badge tone={toneForAction(vm.summary.latestAction)}>{mapLabel('action', vm.summary.latestAction)}</Badge>} />
+          <SectionHeader title="今日概况" subtitle="先看 latest live 结论，再看细节" extra={<Badge tone={toneForAction(vm.summary.latestDecisionAction)}>{mapLabel('action', vm.summary.latestDecisionAction)}</Badge>} />
           <div className="kv-list compact">
             <div><span>下次运行将使用</span><strong>{mapLabel('profile', vm.summary.configuredProfile, vm.summary.configuredProfile)}</strong></div>
             <div><span>上次运行实际使用</span><strong>{mapLabel('profile', vm.summary.lastRunProfile, vm.summary.lastRunProfile || '无')}</strong></div>
+            <div><span>最新 live 决策</span><strong>{mapLabel('action', vm.summary.latestDecisionAction, vm.summary.latestDecisionAction)}</strong></div>
+            <div><span>实际执行</span><strong>{vm.summary.latestExecutionLabel}</strong></div>
+            <div><span>执行细节</span><strong>{vm.summary.latestExecutionDetail}</strong></div>
             <div><span>市场结构</span><strong>{mapLabel('regime', vm.summary.marketRegime, vm.summary.marketRegime)}</strong></div>
             <div><span>策略状态</span><strong>{mapLabel('strategyState', vm.summary.strategyState, vm.summary.strategyState)}</strong></div>
             <div><span>运行模式</span><strong>{mapLabel('mode', vm.summary.lastMode, vm.summary.lastMode)}</strong></div>
@@ -692,10 +696,10 @@ function OverviewPage({ vm, liveError }) {
           <SectionHeader title="数据源对照" subtitle="两套视角解决两个问题" />
           <div className="source-compare">
             <div className="source-card local">
-              <div className="source-title">本地快照</div>
+              <div className="source-title">本地 latest live 快照</div>
               <div className="source-value">{fmtTime(vm.summary.lastRunAt)}</div>
               <ul>
-                <li>完整审计链路</li>
+                <li>首页默认只读 live，不再拿 dry-run 顶替</li>
                 <li>模型复核与状态机</li>
                 <li>适合复盘、验证、排障</li>
               </ul>
@@ -723,6 +727,8 @@ function StrategyPage({ vm }) {
   const scoredCandidates = vm.diagnostics?.scoredCandidates || []
   const exitCandidates = vm.diagnostics?.exitCandidates || []
   const sellStateRows = Object.entries(vm.diagnostics?.sellState?.symbols || {}).map(([symbol, row]) => ({ symbol, ...row }))
+  const technicalOverlay = vm.diagnostics?.technicalOverlay || {}
+  const marketSentimentOverlay = vm.diagnostics?.marketSentimentOverlay || {}
 
   return (
     <div className="stack-page">
@@ -730,12 +736,13 @@ function StrategyPage({ vm }) {
         <SectionHeader title="策略大脑" subtitle="决策、信号、风控和关注方向" extra={<Badge tone={toneForState(vm.signal.state)}>{mapLabel('strategyState', vm.signal.state, vm.signal.state)}</Badge>} />
         <div className="decision-banner">
           <div>
-            <div className="banner-label">当前结论</div>
-            <div className="banner-value smallish">{mapLabel('action', vm.summary.latestAction, vm.summary.latestAction)}</div>
+            <div className="banner-label">最新 live 决策</div>
+            <div className="banner-value smallish">{mapLabel('action', vm.summary.latestDecisionAction, vm.summary.latestDecisionAction)}</div>
           </div>
-          <Badge tone={toneForAction(vm.summary.latestAction)}>{mapLabel('action', vm.summary.latestAction)}</Badge>
+          <Badge tone={toneForAction(vm.summary.latestDecisionAction)}>{mapLabel('action', vm.summary.latestDecisionAction)}</Badge>
         </div>
-        <p className="banner-reason">{vm.summary.latestReason}</p>
+        <p className="banner-reason">{vm.summary.latestDecisionReason}</p>
+        <p className="banner-reason">实际执行：{vm.summary.latestExecutionLabel}；{vm.summary.latestExecutionDetail}</p>
         <div className="mini-grid top-space">
           <div className="mini-card"><div className="mini-label">市场结构</div><strong>{mapLabel('regime', vm.summary.marketRegime, vm.summary.marketRegime)}</strong></div>
           <div className="mini-card"><div className="mini-label">下次运行将使用</div><strong>{mapLabel('profile', vm.summary.configuredProfile, vm.summary.configuredProfile)}</strong></div>
@@ -836,6 +843,44 @@ function StrategyPage({ vm }) {
           </div>
         </Card>
       </div>
+
+      {(technicalOverlay?.items && Object.keys(technicalOverlay.items).length > 0) || (marketSentimentOverlay?.items && Object.keys(marketSentimentOverlay.items).length > 0) ? (
+        <Card>
+          <SectionHeader title="技术面 / 资金流补充" subtitle="V2 新增：技术指标与资金流/龙虎榜解释层" />
+          <div className="page-grid two-col">
+            {technicalOverlay?.items && Object.keys(technicalOverlay.items).length > 0 ? (
+              <div>
+                <h4>技术面（趋势/MACD/RSI/量能）</h4>
+                <div className="focus-stack">
+                  {Object.values(technicalOverlay.items).slice(0, 5).map((item) => (
+                    <article key={item.symbol} className="focus-card">
+                      <div className="focus-head"><strong>{item.name}</strong><span>{item.symbol}</span></div>
+                      <p>{item.summary}</p>
+                      {item.signal_reasons?.length ? <div className="chips">{item.signal_reasons.slice(0,2).map((r,i)=><span key={i} className="chip chip-primary">{r}</span>)}</div> : null}
+                      {item.risk_factors?.length ? <div className="chips">{item.risk_factors.slice(0,2).map((r,i)=><span key={i} className="chip chip-danger">{r}</span>)}</div> : null}
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {marketSentimentOverlay?.items && Object.keys(marketSentimentOverlay.items).length > 0 ? (
+              <div>
+                <h4>资金流 / 龙虎榜</h4>
+                <div className="focus-stack">
+                  {Object.values(marketSentimentOverlay.items).slice(0, 5).map((item) => (
+                    <article key={item.symbol} className="focus-card">
+                      <div className="focus-head"><strong>{item.name}</strong><span>{item.symbol}</span></div>
+                      <p>{item.summary}</p>
+                      {item.positive_factors?.length ? <div className="chips">{item.positive_factors.slice(0,2).map((r,i)=><span key={i} className="chip chip-primary">{r}</span>)}</div> : null}
+                      {item.risk_factors?.length ? <div className="chips">{item.risk_factors.slice(0,2).map((r,i)=><span key={i} className="chip chip-danger">{r}</span>)}</div> : null}
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
 
       {exitCandidates.length ? (
         <Card>
