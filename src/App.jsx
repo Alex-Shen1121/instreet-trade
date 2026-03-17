@@ -403,7 +403,7 @@ function routeToPageKey(pathname) {
 
 function useDashboardData(pathname) {
   const pageKey = routeToPageKey(pathname)
-  const [pageData, setPageData] = useState(null)
+  const [pageState, setPageState] = useState(null)
   const [configData, setConfigData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [pageLoading, setPageLoading] = useState(false)
@@ -419,7 +419,7 @@ function useDashboardData(pathname) {
       else setPageLoading(true)
       const res = await fetch(`/api/pages/${currentPage}`)
       const json = await readApiResponse(res)
-      setPageData(json)
+      setPageState({ pageKey: currentPage, data: json })
       setError('')
     } catch (err) {
       setError(err.message || '页面数据加载失败')
@@ -444,6 +444,7 @@ function useDashboardData(pathname) {
   }, [])
 
   useEffect(() => {
+    setPageState(null)
     loadPage(pageKey, true)
     const timer = setInterval(() => loadPage(pageKey), 30000)
     return () => clearInterval(timer)
@@ -489,7 +490,8 @@ function useDashboardData(pathname) {
   }
 
   return {
-    pageData,
+    pageData: pageState?.data || null,
+    loadedPageKey: pageState?.pageKey || null,
     configData,
     loading,
     pageLoading,
@@ -1284,6 +1286,7 @@ function App() {
   const location = useLocation()
   const {
     pageData,
+    loadedPageKey,
     configData,
     loading,
     pageLoading,
@@ -1298,10 +1301,11 @@ function App() {
     updateProfile,
     updateActiveProfile,
   } = useDashboardData(location.pathname)
-  const vm = pageData
+  const currentPageKey = routeToPageKey(location.pathname)
+  const vm = loadedPageKey === currentPageKey ? pageData : null
 
-  if (loading) return <div className="screen-state">正在加载 dashboard...</div>
-  if (error || !vm) return <div className="screen-state error-state">加载失败：{error || '未知错误'}</div>
+  if (error && !vm) return <div className="screen-state error-state">加载失败：{error || '未知错误'}</div>
+  if (loading || !vm) return <div className="screen-state">正在加载 dashboard...</div>
 
   return (
     <Layout vm={vm} pageLoading={pageLoading} pageError={vm.summary?.fallbackReason || error} refreshPage={refreshPage}>
