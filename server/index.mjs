@@ -7,6 +7,7 @@ import {
   getLiveInStreetData,
   getLogContent,
   getPageData,
+  getShellData,
   getStrategyConfigData,
   updateManifestConfig,
   updateProfileConfig,
@@ -32,6 +33,15 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/overview', (_req, res) => {
   res.json(getDashboardData());
+});
+
+app.get('/api/shell', async (_req, res) => {
+  try {
+    const data = await getShellData();
+    res.json(data);
+  } catch (error) {
+    handleApiError(res, error);
+  }
 });
 
 app.get('/api/pages/:page', async (req, res) => {

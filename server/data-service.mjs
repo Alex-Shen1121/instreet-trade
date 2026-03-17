@@ -570,6 +570,24 @@ function buildCommonPageVm(snapshot, liveData, liveError = '') {
   };
 }
 
+export async function getShellData() {
+  const snapshot = getDashboardData();
+  let liveData = null;
+  let liveError = '';
+  try {
+    liveData = await getLiveInStreetData();
+  } catch (error) {
+    liveError = error?.message || 'live fetch failed';
+  }
+
+  const common = buildCommonPageVm(snapshot, liveData, liveError);
+  return {
+    summary: common.summary,
+    links: common.links,
+    completedFeatures: common.completedFeatures,
+  };
+}
+
 export async function getPageData(page) {
   const snapshot = getDashboardData();
   let liveData = null;

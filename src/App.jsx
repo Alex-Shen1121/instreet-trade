@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6']
@@ -94,6 +94,87 @@ function normalizeTabPath(pathname) {
 
 function getTabLabel(pathname) {
   return NAV_ITEMS.find((item) => item.to === pathname)?.label || '总览'
+}
+
+const TAB_STORAGE_KEY = 'instreet.console.tabs.v2'
+
+function getDefaultTabs() {
+  const initialPath = normalizeTabPath(window.location.pathname)
+  return [{ path: initialPath, label: getTabLabel(initialPath) }]
+}
+
+function loadStoredTabs() {
+  try {
+    const raw = window.localStorage.getItem(TAB_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || !Array.isArray(parsed.tabs) || !parsed.activeTab) return null
+    const activeTab = normalizeTabPath(parsed.activeTab)
+    const tabs = parsed.tabs
+      .map((tab) => ({ path: normalizeTabPath(tab?.path), label: getTabLabel(tab?.path) }))
+      .filter((tab, index, arr) => arr.findIndex((item) => item.path === tab.path) === index)
+    if (!tabs.find((tab) => tab.path === activeTab)) {
+      tabs.push({ path: activeTab, label: getTabLabel(activeTab) })
+    }
+    if (!tabs.length) return null
+    return {
+      tabs,
+      activeTab,
+    }
+  } catch {
+    return null
+  }
+}
+
+function persistTabs(tabs, activeTab) {
+  window.localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify({ tabs, activeTab }))
+}
+
+function ensureSerializable(value, path = 'patch') {
+  if (value === undefined) throw new Error(`${path} 里存在 undefined，不能保存`)
+  if (typeof value === 'number' && !Number.isFinite(value)) throw new Error(`${path} 里存在非法数字`)
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => ensureSerializable(item, `${path}[${index}]`))
+    return
+  }
+  if (value && typeof value === 'object') {
+    Object.entries(value).forEach(([key, item]) => ensureSerializable(item, `${path}.${key}`))
+  }
+}
+
+class TabErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null })
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="content-error-state">
+          <strong>这个标签页加载失败了</strong>
+          <p>{this.state.error.message || '渲染过程中发生未知错误'}</p>
+          <button type="button" className="ghost-inline-button" onClick={() => {
+            this.setState({ error: null })
+            this.props.onRetry?.()
+          }}>
+            重试当前标签
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 const MANIFEST_SECTION_DEFS = [
@@ -421,6 +502,22 @@ function useDashboardData(pathname) {
   const [configError, setConfigError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
 
+  const loadShell = useCallback(async (initial = false) => {
+    try {
+      if (initial && !shellData) setLoading(true)
+      const res = await fetch('/api/shell')
+      const json = await readApiResponse(res)
+      setShellData(json)
+      setError('')
+      return json
+    } catch (err) {
+      setError(err.message || '壳层数据加载失败')
+      throw err
+    } finally {
+      if (initial) setLoading(false)
+    }
+  }, [shellData])
+
   const loadPage = useCallback(async (currentPage, initial = false) => {
     try {
       if (initial) setLoading(true)
@@ -428,10 +525,11 @@ function useDashboardData(pathname) {
       const res = await fetch(`/api/pages/${currentPage}`)
       const json = await readApiResponse(res)
       setPageCache((prev) => ({ ...prev, [currentPage]: json }))
-      setShellData(json)
       setError('')
+      return json
     } catch (err) {
       setError(err.message || '页面数据加载失败')
+      throw err
     } finally {
       setLoading(false)
       setPageLoading(false)
@@ -455,7 +553,13 @@ function useDashboardData(pathname) {
   const activePageData = pageCache[pageKey] || null
 
   useEffect(() => {
-    loadPage(pageKey, !activePageData && !shellData)
+    loadShell(!shellData).catch(() => {})
+    const timer = setInterval(() => loadShell(), 30000)
+    return () => clearInterval(timer)
+  }, [loadShell, shellData])
+
+  useEffect(() => {
+    loadPage(pageKey, !activePageData && !shellData).catch(() => {})
     const timer = setInterval(() => loadPage(pageKey), 30000)
     return () => clearInterval(timer)
   }, [pageKey, loadPage, activePageData, shellData])
@@ -466,6 +570,7 @@ function useDashboardData(pathname) {
 
   async function saveConfig(url, payload, successText) {
     try {
+      ensureSerializable(payload)
       setSaving(true)
       setSaveMessage('')
       const res = await fetch(url, {
@@ -477,7 +582,7 @@ function useDashboardData(pathname) {
       setConfigData(json)
       setConfigError('')
       setSaveMessage(successText)
-      await loadPage('config')
+      await Promise.all([loadPage('config'), loadShell()])
       return json
     } catch (err) {
       setConfigError(err.message || '保存配置失败')
@@ -510,7 +615,7 @@ function useDashboardData(pathname) {
     error,
     configError,
     saveMessage,
-    refreshPage: () => loadPage(pageKey),
+    refreshPage: () => Promise.all([loadPage(pageKey), loadShell()]),
     refreshConfig: loadConfig,
     updateManifest,
     updateProfile,
@@ -518,7 +623,7 @@ function useDashboardData(pathname) {
   }
 }
 
-function Layout({ vm, tabs, activeTab, onOpenTab, onCloseTab, pageLoading, pageError, refreshPage, children }) {
+function Layout({ vm, tabs, activeTab, onOpenTab, onCloseTab, onCloseOtherTabs, onCloseRightTabs, pageLoading, pageError, refreshPage, children }) {
   return (
     <div className="app-shell grain">
       <aside className="sidebar">
@@ -564,24 +669,36 @@ function Layout({ vm, tabs, activeTab, onOpenTab, onCloseTab, pageLoading, pageE
         <div className="sidebar-footnote">当前页面：{tabs.find((t) => t.path === activeTab)?.label || '总览'}</div>
       </aside>
       <main className="main-content">
-        <div className="tab-strip">
-          {tabs.map((tab) => (
-            <div
-              key={tab.path}
-              className={`tab-item ${activeTab === tab.path ? 'active' : ''}`}
-              onClick={() => onOpenTab(tab.path, tab.label)}
-            >
-              <span className="tab-label">{tab.label}</span>
-              <button
-                type="button"
-                className="tab-close"
-                onClick={(e) => onCloseTab(tab.path, e)}
-                aria-label={`关闭 ${tab.label}`}
+        <div className="tab-strip-shell">
+          <div className="tab-strip">
+            {tabs.map((tab) => (
+              <div
+                key={tab.path}
+                className={`tab-item ${activeTab === tab.path ? 'active' : ''}`}
+                onClick={() => onOpenTab(tab.path, tab.label)}
               >
-                ×
-              </button>
-            </div>
-          ))}
+                <span className="tab-label">{tab.label}</span>
+                <button
+                  type="button"
+                  className="tab-close"
+                  onClick={(e) => onCloseTab(tab.path, e)}
+                  aria-label={`关闭 ${tab.label}`}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="tab-strip-tools">
+            <button type="button" className="ghost-inline-button compact" onClick={refreshPage} disabled={pageLoading}>刷新当前标签</button>
+            <button type="button" className="ghost-inline-button compact" onClick={onCloseOtherTabs} disabled={tabs.length <= 1}>关闭其他</button>
+            <button type="button" className="ghost-inline-button compact" onClick={onCloseRightTabs} disabled={tabs.findIndex((tab) => tab.path === activeTab) === tabs.length - 1}>关闭右侧</button>
+          </div>
+        </div>
+        <div className="tab-status-bar">
+          <span>当前标签：{tabs.find((tab) => tab.path === activeTab)?.label || '总览'}</span>
+          <span>数据时间：{vm.summary?.asOf ? fmtTime(vm.summary.asOf) : fmtTime(vm.summary?.lastRunAt)}</span>
+          <span>{pageLoading ? '右侧内容刷新中…' : '仅右侧内容区刷新'}</span>
         </div>
         <div className="tab-content">{children}</div>
       </main>
@@ -1318,11 +1435,9 @@ function ConfigPage({ configData, configLoading, configError, saveMessage, savin
 }
 
 function App() {
-  const [tabs, setTabs] = useState(() => {
-    const initialPath = normalizeTabPath(window.location.pathname)
-    return [{ path: initialPath, label: getTabLabel(initialPath) }]
-  })
-  const [activeTab, setActiveTab] = useState(() => normalizeTabPath(window.location.pathname))
+  const storedTabsState = useMemo(() => loadStoredTabs(), [])
+  const [tabs, setTabs] = useState(() => storedTabsState?.tabs || getDefaultTabs())
+  const [activeTab, setActiveTab] = useState(() => storedTabsState?.activeTab || normalizeTabPath(window.location.pathname))
 
   const {
     pageData,
@@ -1341,6 +1456,8 @@ function App() {
     updateProfile,
     updateActiveProfile,
   } = useDashboardData(activeTab)
+
+  const activeTabIndex = useMemo(() => tabs.findIndex((tab) => tab.path === activeTab), [tabs, activeTab])
 
   const openTab = useCallback((path, label) => {
     const normalizedPath = normalizeTabPath(path)
@@ -1369,6 +1486,18 @@ function App() {
     })
   }, [activeTab])
 
+  const closeOtherTabs = useCallback(() => {
+    setTabs((prev) => prev.filter((tab) => tab.path === activeTab))
+  }, [activeTab])
+
+  const closeRightTabs = useCallback(() => {
+    setTabs((prev) => prev.filter((_, index) => index <= activeTabIndex))
+  }, [activeTabIndex])
+
+  useEffect(() => {
+    persistTabs(tabs, activeTab)
+  }, [tabs, activeTab])
+
   useEffect(() => {
     if (window.location.pathname === '/' && activeTab === '/overview') {
       window.history.replaceState(null, '', '/overview')
@@ -1377,7 +1506,7 @@ function App() {
 
   if (loading && !shellData) return <div className="screen-state">正在加载 dashboard...</div>
 
-  const shellVm = pageData || shellData
+  const shellVm = shellData || pageData
   if (!shellVm) return <div className="screen-state error-state">加载失败：{error || '未知错误'}</div>
 
   const renderPage = () => {
@@ -1412,11 +1541,15 @@ function App() {
       activeTab={activeTab}
       onOpenTab={openTab}
       onCloseTab={closeTab}
+      onCloseOtherTabs={closeOtherTabs}
+      onCloseRightTabs={closeRightTabs}
       pageLoading={pageLoading}
       pageError={pageData?.summary?.fallbackReason || shellVm.summary?.fallbackReason || error}
       refreshPage={refreshPage}
     >
-      {renderPage()}
+      <TabErrorBoundary resetKey={activeTab} onRetry={refreshPage}>
+        {renderPage()}
+      </TabErrorBoundary>
     </Layout>
   )
 }
