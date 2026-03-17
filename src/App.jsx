@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import './App.css'
 
@@ -83,8 +83,8 @@ const LABELS = {
 const NAV_ITEMS = [
   { to: '/overview', label: '总览', desc: '今日概况' },
   { to: '/strategy', label: '策略页', desc: '信号与状态机' },
-  { to: '/portfolio', label: '持仓页', desc: '快照 vs 实时' },
-  { to: '/validation', label: '验证页', desc: 'dry-run / replay' },
+  { to: '/portfolio', label: '持仓页', desc: '当前持仓 / 仓位' },
+  { to: '/validation', label: '验证页', desc: '历史验证' },
   { to: '/history', label: '历史页', desc: '审计 / 日志 / 新闻' },
   { to: '/config', label: '配置页', desc: '策略参数 / 大策略' },
 ]
@@ -267,21 +267,6 @@ function fmtTime(value) {
   return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
 
-function fmtClock(value) {
-  if (!value) return '未知时间'
-  return new Date(value).toLocaleTimeString('zh-CN', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function fmtAgo(freshness) {
-  if (!freshness) return '未知'
-  if (freshness.minutes < 1) return `${freshness.seconds}s 前`
-  return `${freshness.minutes} 分钟前`
-}
-
 function mapLabel(group, value, fallback = '未知') {
   if (value === null || value === undefined || value === '') return fallback
   return LABELS[group]?.[value] || value
@@ -407,33 +392,44 @@ async function readApiResponse(res) {
   throw new Error(`接口没有返回 JSON，实际返回了 ${contentType || '未知类型'}：${snippet || 'empty response'}`)
 }
 
-function useDashboardData() {
-  const [localData, setLocalData] = useState(null)
-  const [liveData, setLiveData] = useState(null)
+function routeToPageKey(pathname) {
+  if (pathname === '/strategy') return 'strategy'
+  if (pathname === '/portfolio') return 'portfolio'
+  if (pathname === '/validation') return 'validation'
+  if (pathname === '/history') return 'history'
+  if (pathname === '/config') return 'config'
+  return 'overview'
+}
+
+function useDashboardData(pathname) {
+  const pageKey = routeToPageKey(pathname)
+  const [pageData, setPageData] = useState(null)
   const [configData, setConfigData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [liveLoading, setLiveLoading] = useState(false)
+  const [pageLoading, setPageLoading] = useState(false)
   const [configLoading, setConfigLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [liveError, setLiveError] = useState('')
   const [configError, setConfigError] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
 
-  async function loadLocal() {
+  const loadPage = useCallback(async (currentPage, initial = false) => {
     try {
-      const res = await fetch('/api/overview')
+      if (initial) setLoading(true)
+      else setPageLoading(true)
+      const res = await fetch(`/api/pages/${currentPage}`)
       const json = await readApiResponse(res)
-      setLocalData(json)
+      setPageData(json)
       setError('')
     } catch (err) {
-      setError(err.message || '加载本地快照失败')
+      setError(err.message || '页面数据加载失败')
     } finally {
       setLoading(false)
+      setPageLoading(false)
     }
-  }
+  }, [])
 
-  async function loadConfig() {
+  const loadConfig = useCallback(async () => {
     try {
       setConfigLoading(true)
       const res = await fetch('/api/config')
@@ -445,35 +441,17 @@ function useDashboardData() {
     } finally {
       setConfigLoading(false)
     }
-  }
-
-  useEffect(() => {
-    let timer
-    loadLocal()
-    loadConfig()
-    timer = setInterval(loadLocal, 30000)
-    return () => clearInterval(timer)
   }, [])
 
-  async function refreshLive() {
-    try {
-      setLiveLoading(true)
-      const res = await fetch('/api/live')
-      const json = await readApiResponse(res)
-      setLiveData(json)
-      setLiveError('')
-    } catch (err) {
-      setLiveError(err.message || '实时拉取失败')
-    } finally {
-      setLiveLoading(false)
-    }
-  }
+  useEffect(() => {
+    loadPage(pageKey, true)
+    const timer = setInterval(() => loadPage(pageKey), 30000)
+    return () => clearInterval(timer)
+  }, [pageKey, loadPage])
 
   useEffect(() => {
-    refreshLive()
-    const timer = setInterval(refreshLive, 60000)
-    return () => clearInterval(timer)
-  }, [])
+    if (pageKey === 'config') loadConfig()
+  }, [pageKey, loadConfig])
 
   async function saveConfig(url, payload, successText) {
     try {
@@ -488,7 +466,7 @@ function useDashboardData() {
       setConfigData(json)
       setConfigError('')
       setSaveMessage(successText)
-      await loadLocal()
+      await loadPage('config')
       return json
     } catch (err) {
       setConfigError(err.message || '保存配置失败')
@@ -511,18 +489,16 @@ function useDashboardData() {
   }
 
   return {
-    localData,
-    liveData,
+    pageData,
     configData,
     loading,
-    liveLoading,
+    pageLoading,
     configLoading,
     saving,
     error,
-    liveError,
     configError,
     saveMessage,
-    refreshLive,
+    refreshPage: () => loadPage(pageKey),
     refreshConfig: loadConfig,
     updateManifest,
     updateProfile,
@@ -530,63 +506,7 @@ function useDashboardData() {
   }
 }
 
-function useViewModel(localData, liveData) {
-  return useMemo(() => {
-    if (!localData) return null
-    const { summary, portfolio, latestRun, history, links, completedFeatures } = localData
-    const signal = latestRun?.strategySignal || {}
-    const dynamicFocus = latestRun?.dynamicFocus || {}
-    const diagnostics = latestRun?.diagnostics || {}
-    const latestAudit = latestRun?.audit || {}
-    const latestPostContent = latestAudit?.outputs?.generated_post_content || latestRun?.state?.last_generated_post_content || ''
-    const holdings = portfolio?.holdings || []
-    const trades = portfolio?.trades || []
-    const news = latestRun?.news || []
-    const exposures = Object.entries(localData?.portfolio?.bucketExposures || {}).map(([name, value]) => ({
-      name: mapLabel('bucket', name, name),
-      rawName: name,
-      value: Number(value),
-    }))
-    const auditModes = Object.entries(localData?.history?.validation?.counts || {}).map(([name, value]) => ({
-      name: mapLabel('mode', name, name),
-      rawName: name,
-      value,
-    }))
-    const assetTrend = (localData?.history?.audits || []).slice().reverse().map((item) => ({
-      name: fmtClock(item.updatedAt || item.createdAt),
-      totalValue: item.totalValue || 0,
-      returnRate: (item.returnRate || 0) * 100,
-      modeLabel: mapLabel('mode', item.mode, item.mode),
-    }))
-    const liveSummary = liveData?.summary || {}
-    return {
-      summary,
-      portfolio,
-      latestRun,
-      history,
-      links,
-      completedFeatures,
-      signal,
-      dynamicFocus,
-      diagnostics,
-      latestAudit,
-      latestPostContent,
-      holdings,
-      trades,
-      news,
-      exposures,
-      auditModes,
-      assetTrend,
-      liveSummary,
-      liveHoldings: liveSummary?.holdings || [],
-      liveTrades: liveSummary?.trades || [],
-      localPending: summary.pendingTrades || 0,
-      livePending: liveSummary?.tradeSummary?.pending || 0,
-    }
-  }, [localData, liveData])
-}
-
-function Layout({ vm, liveLoading, liveError, refreshLive, children }) {
+function Layout({ vm, pageLoading, pageError, refreshPage, children }) {
   const location = useLocation()
   return (
     <div className="app-shell grain">
@@ -617,12 +537,12 @@ function Layout({ vm, liveLoading, liveError, refreshLive, children }) {
         </div>
 
         <div className="sidebar-card dark">
-          <div className="sidebar-title">实时模式</div>
-          <p>本地快照负责完整策略链路，实时数据负责当前盘面与账户状态。</p>
-          <button className="ghost-button" onClick={refreshLive} disabled={liveLoading}>
-            {liveLoading ? '实时刷新中…' : '刷新 InStreet 实时数据'}
+          <div className="sidebar-title">数据刷新</div>
+          <p>页面优先展示当前可用数据；如果实时接口失败，才回退到最近一次可用结果。</p>
+          <button className="ghost-button" onClick={refreshPage} disabled={pageLoading}>
+            {pageLoading ? '刷新中…' : '刷新当前页面'}
           </button>
-          {liveError ? <div className="inline-error">{liveError}</div> : null}
+          {pageError ? <div className="inline-error">{pageError}</div> : null}
         </div>
 
         <div className="sidebar-footnote">当前页面：{NAV_ITEMS.find((item) => item.to === location.pathname)?.label || '总览'}</div>
@@ -632,16 +552,16 @@ function Layout({ vm, liveLoading, liveError, refreshLive, children }) {
   )
 }
 
-function OverviewPage({ vm, liveError }) {
+function OverviewPage({ vm }) {
   return (
     <>
       <header className="hero-v2">
         <div className="hero-copy-block">
-          <div className="hero-eyebrow">策略控制台 / Mixed Mode</div>
-          <h2>把“策略推演”与“盘面现实”分开看，也能一起看清楚</h2>
+          <div className="hero-eyebrow">策略控制台</div>
+          <h2>先看当前状态，再看策略细节</h2>
           <p>
-            这版 dashboard 已拆成多个页面。你可以分别查看总览、策略、持仓、验证和历史，
-            同时前端已经把关键枚举值转成人能理解的词，不再直接暴露内部代码名。
+            这版 dashboard 已按页面拆分接口。你可以分别查看总览、策略、持仓、验证和历史，
+            页面优先展示当前可用数据，接口失败时才回退到最近一次可用结果。
           </p>
           <div className="hero-links">
             {vm.links.lastPostUrl ? <a href={vm.links.lastPostUrl} target="_blank" rel="noreferrer">最新分析帖</a> : null}
@@ -653,64 +573,64 @@ function OverviewPage({ vm, liveError }) {
 
         <div className="hero-status-grid">
           <div className="hero-status-card bright">
-            <span>最新 live 快照</span>
-            <strong>{fmtAgo(vm.summary.freshness)}</strong>
-            <small>最近一轮 live：{fmtTime(vm.summary.lastRunAt)}</small>
+            <span>数据时间</span>
+            <strong>{fmtTime(vm.summary.asOf)}</strong>
+            <small>{vm.summary.fallbackReason || '当前页面已完成刷新'}</small>
           </div>
           <div className="hero-status-card">
-            <span>实时 InStreet</span>
-            <strong>{vm.liveSummary?.pulledAt ? fmtTime(vm.liveSummary.pulledAt) : '未获取'}</strong>
-            <small>{liveError || '每 60 秒自动刷新，可手动刷新'}</small>
-          </div>
-          <div className="hero-status-card">
-            <span>最新 live 决策</span>
+            <span>最新决策</span>
             <strong>{mapLabel('action', vm.summary.latestDecisionAction, vm.summary.latestDecisionAction)}</strong>
-            <small>{vm.summary.latestExecutionLabel} · {vm.summary.latestDecisionReason}</small>
+            <small>{vm.summary.latestDecisionReason || '暂无'}</small>
+          </div>
+          <div className="hero-status-card">
+            <span>执行结果</span>
+            <strong>{vm.summary.latestExecutionLabel || '暂无'}</strong>
+            <small>{vm.summary.latestExecutionDetail || '暂无'}</small>
           </div>
         </div>
       </header>
 
       <section className="stats-grid v2">
-        <StatCard label="策略快照总资产" value={fmtMoney(vm.summary.totalValue)} hint={`收益率 ${fmtPct(vm.summary.returnRate)}`} tone="blue" />
-        <StatCard label="策略快照现金" value={fmtMoney(vm.summary.cash)} hint={`持仓市值 ${fmtMoney(vm.summary.holdingsValue)}`} tone="cyan" />
-        <StatCard label="实时总资产" value={fmtMoney(vm.liveSummary?.portfolio?.total_value)} hint={`实时现金 ${fmtMoney(vm.liveSummary?.portfolio?.cash)}`} tone="green" />
-        <StatCard label="待成交订单" value={`${vm.localPending} / ${vm.livePending}`} hint="左：快照，右：实时" tone="amber" />
+        <StatCard label="总资产" value={fmtMoney(vm.summary.totalValue)} hint={`收益率 ${fmtPct(vm.summary.returnRate)}`} tone="blue" />
+        <StatCard label="可用现金" value={fmtMoney(vm.summary.cash)} hint={`持仓市值 ${fmtMoney(vm.summary.holdingsValue)}`} tone="cyan" />
+        <StatCard label="持仓市值" value={fmtMoney(vm.summary.holdingsValue)} hint={`当前待成交 ${vm.summary.pendingTrades || 0} 笔`} tone="green" />
+        <StatCard label="待成交订单" value={vm.summary.pendingTrades || 0} hint="仅在接口失败时回退到最近一次可用结果" tone="amber" />
       </section>
 
       <div className="page-grid two-col">
         <Card>
-          <SectionHeader title="今日概况" subtitle="先看 latest live 结论，再看细节" extra={<Badge tone={toneForAction(vm.summary.latestDecisionAction)}>{mapLabel('action', vm.summary.latestDecisionAction)}</Badge>} />
+          <SectionHeader title="今日概况" subtitle="先看结论，再看细节" extra={<Badge tone={toneForAction(vm.summary.latestDecisionAction)}>{mapLabel('action', vm.summary.latestDecisionAction)}</Badge>} />
           <div className="kv-list compact">
             <div><span>下次运行将使用</span><strong>{mapLabel('profile', vm.summary.configuredProfile, vm.summary.configuredProfile)}</strong></div>
             <div><span>上次运行实际使用</span><strong>{mapLabel('profile', vm.summary.lastRunProfile, vm.summary.lastRunProfile || '无')}</strong></div>
-            <div><span>最新 live 决策</span><strong>{mapLabel('action', vm.summary.latestDecisionAction, vm.summary.latestDecisionAction)}</strong></div>
+            <div><span>最新决策</span><strong>{mapLabel('action', vm.summary.latestDecisionAction, vm.summary.latestDecisionAction)}</strong></div>
             <div><span>实际执行</span><strong>{vm.summary.latestExecutionLabel}</strong></div>
             <div><span>执行细节</span><strong>{vm.summary.latestExecutionDetail}</strong></div>
             <div><span>市场结构</span><strong>{mapLabel('regime', vm.summary.marketRegime, vm.summary.marketRegime)}</strong></div>
             <div><span>策略状态</span><strong>{mapLabel('strategyState', vm.summary.strategyState, vm.summary.strategyState)}</strong></div>
-            <div><span>运行模式</span><strong>{mapLabel('mode', vm.summary.lastMode, vm.summary.lastMode)}</strong></div>
+            <div><span>数据时间</span><strong>{fmtTime(vm.summary.asOf)}</strong></div>
           </div>
         </Card>
 
         <Card>
-          <SectionHeader title="数据源对照" subtitle="两套视角解决两个问题" />
+          <SectionHeader title="系统链路" subtitle="页面按接口拆分，展示优先取当前可用数据" />
           <div className="source-compare">
             <div className="source-card local">
-              <div className="source-title">本地 latest live 快照</div>
-              <div className="source-value">{fmtTime(vm.summary.lastRunAt)}</div>
+              <div className="source-title">页面接口</div>
+              <div className="source-value">按 Tab 单独返回</div>
               <ul>
-                <li>首页默认只读 live，不再拿 dry-run 顶替</li>
-                <li>模型复核与状态机</li>
-                <li>适合复盘、验证、排障</li>
+                <li>总览、策略、持仓、验证、历史分别取数</li>
+                <li>避免一个接口返回整站全部数据</li>
+                <li>每个页面可以独立刷新</li>
               </ul>
             </div>
             <div className="source-card live">
-              <div className="source-title">实时拉取</div>
-              <div className="source-value">{vm.liveSummary?.pulledAt ? fmtTime(vm.liveSummary.pulledAt) : '未获取'}</div>
+              <div className="source-title">数据策略</div>
+              <div className="source-value">当前可用优先</div>
               <ul>
-                <li>当前账户与持仓</li>
-                <li>当前 pending / executed</li>
-                <li>适合盯盘时快速确认</li>
+                <li>实时接口可用时优先展示当前数据</li>
+                <li>接口失败时自动回退到最近一次可用结果</li>
+                <li>不再在页面上强调“快照 / 实时”对照</li>
               </ul>
             </div>
           </div>
@@ -729,6 +649,7 @@ function StrategyPage({ vm }) {
   const sellStateRows = Object.entries(vm.diagnostics?.sellState?.symbols || {}).map(([symbol, row]) => ({ symbol, ...row }))
   const technicalOverlay = vm.diagnostics?.technicalOverlay || {}
   const marketSentimentOverlay = vm.diagnostics?.marketSentimentOverlay || {}
+  const overlaySourceRunAt = vm.diagnostics?.overlaySourceRunAt || vm.summary?.lastRunAt
 
   return (
     <div className="stack-page">
@@ -736,7 +657,7 @@ function StrategyPage({ vm }) {
         <SectionHeader title="策略大脑" subtitle="决策、信号、风控和关注方向" extra={<Badge tone={toneForState(vm.signal.state)}>{mapLabel('strategyState', vm.signal.state, vm.signal.state)}</Badge>} />
         <div className="decision-banner">
           <div>
-            <div className="banner-label">最新 live 决策</div>
+            <div className="banner-label">最新决策</div>
             <div className="banner-value smallish">{mapLabel('action', vm.summary.latestDecisionAction, vm.summary.latestDecisionAction)}</div>
           </div>
           <Badge tone={toneForAction(vm.summary.latestDecisionAction)}>{mapLabel('action', vm.summary.latestDecisionAction)}</Badge>
@@ -846,7 +767,7 @@ function StrategyPage({ vm }) {
 
       {(technicalOverlay?.items && Object.keys(technicalOverlay.items).length > 0) || (marketSentimentOverlay?.items && Object.keys(marketSentimentOverlay.items).length > 0) ? (
         <Card>
-          <SectionHeader title="技术面 / 资金流补充" subtitle="V2 新增：技术指标与资金流/龙虎榜解释层" />
+          <SectionHeader title="技术面 / 资金流补充" subtitle={`V2 新增：技术指标与资金流/龙虎榜解释层${overlaySourceRunAt ? ` · ${fmtTime(overlaySourceRunAt)}` : ''}`} />
           <div className="page-grid two-col">
             {technicalOverlay?.items && Object.keys(technicalOverlay.items).length > 0 ? (
               <div>
@@ -908,23 +829,27 @@ function PortfolioPage({ vm }) {
     { key: 'current_price', title: '现价', render: (row) => fmtMoney(row.current_price) },
     { key: 'profit_rate', title: '盈亏', render: (row) => fmtPct(row.profit_rate) },
   ]
-  const liveColumns = [
-    { key: 'name', title: '标的', render: (row) => <><strong>{row.name}</strong><span className="subline">{row.symbol}</span></> },
-    { key: 'shares', title: '股数' },
-    { key: 'avg_cost', title: '成本', render: (row) => fmtMoney(row.avg_cost) },
-    { key: 'current_price', title: '现价', render: (row) => fmtMoney(row.current_price) },
-    { key: 'profit_rate', title: '盈亏', render: (row) => fmtPct(row.profit_rate) },
+  const tradeColumns = [
+    { key: 'name', title: '标的', render: (row) => <><strong>{row.name || row.symbol}</strong><span className="subline">{row.symbol || '—'}</span></> },
+    { key: 'action', title: '动作', render: (row) => mapLabel('action', row.action, row.action || '未知') },
+    { key: 'status', title: '状态', render: (row) => mapLabel('status', row.status, row.status || '未知') },
+    { key: 'shares', title: '股数', render: (row) => row.shares || 0 },
   ]
   return (
     <div className="stack-page">
       <div className="page-grid two-col">
         <Card>
-          <SectionHeader title="策略快照持仓" subtitle="用于复盘与策略解释" />
+          <SectionHeader title="当前持仓" subtitle="页面优先展示当前可用的持仓结果" />
           <Table columns={columns} rows={vm.holdings} rowKey="symbol" />
         </Card>
         <Card>
-          <SectionHeader title="实时 InStreet 持仓" subtitle="用于确认盘面真实状态" />
-          <Table columns={liveColumns} rows={vm.liveHoldings} rowKey="symbol" />
+          <SectionHeader title="账户概况" subtitle="当前资产与仓位结构" />
+          <div className="stats-grid compact two-up">
+            <StatCard label="总资产" value={fmtMoney(vm.summary.totalValue)} tone="blue" />
+            <StatCard label="可用现金" value={fmtMoney(vm.summary.cash)} tone="green" />
+            <StatCard label="持仓市值" value={fmtMoney(vm.summary.holdingsValue)} tone="cyan" />
+            <StatCard label="待成交" value={vm.summary.pendingTrades || 0} tone="amber" />
+          </div>
         </Card>
       </div>
 
@@ -936,13 +861,8 @@ function PortfolioPage({ vm }) {
           </Suspense>
         </Card>
         <Card>
-          <SectionHeader title="账户对照" subtitle="快照账户 vs 实时账户" />
-          <div className="stats-grid compact two-up">
-            <StatCard label="快照总资产" value={fmtMoney(vm.summary.totalValue)} tone="blue" />
-            <StatCard label="实时总资产" value={fmtMoney(vm.liveSummary?.portfolio?.total_value)} tone="green" />
-            <StatCard label="快照现金" value={fmtMoney(vm.summary.cash)} tone="cyan" />
-            <StatCard label="实时现金" value={fmtMoney(vm.liveSummary?.portfolio?.cash)} tone="amber" />
-          </div>
+          <SectionHeader title="最近交易" subtitle="当前页面优先展示当前可用交易结果" />
+          <Table columns={tradeColumns} rows={(vm.trades || []).slice(0, 8)} rowKey="id" />
         </Card>
       </div>
     </div>
@@ -994,9 +914,9 @@ function HistoryPage({ vm }) {
         </Card>
 
         <Card>
-          <SectionHeader title="最近交易" subtitle="快照 + 实时合并显示" />
+          <SectionHeader title="最近交易" subtitle="优先展示当前可用交易结果" />
           <div className="audit-list">
-            {[...vm.liveTrades, ...vm.trades].slice(0, 10).map((item, idx) => (
+            {(vm.trades || []).slice(0, 10).map((item, idx) => (
               <div key={`${item.symbol || idx}-${idx}`} className="trade-row">
                 <div>
                   <strong>{item.name || item.symbol || '未知标的'}</strong>
@@ -1027,7 +947,7 @@ function HistoryPage({ vm }) {
       <div className="page-grid two-col">
         <Card>
           <SectionHeader title="最新日志尾部" subtitle="适合快速排查问题" />
-          <pre className="console-block">{vm.latestRun.latestLogPreview || '暂无日志'}</pre>
+          <pre className="console-block">{vm.latestLogPreview || '暂无日志'}</pre>
         </Card>
         <Card>
           <SectionHeader title="最新分析帖正文" subtitle="用于复核对外输出是否一致" />
@@ -1361,34 +1281,33 @@ function ConfigPage({ configData, configLoading, configError, saveMessage, savin
 }
 
 function App() {
+  const location = useLocation()
   const {
-    localData,
-    liveData,
+    pageData,
     configData,
     loading,
-    liveLoading,
+    pageLoading,
     configLoading,
     saving,
     error,
-    liveError,
     configError,
     saveMessage,
-    refreshLive,
+    refreshPage,
     refreshConfig,
     updateManifest,
     updateProfile,
     updateActiveProfile,
-  } = useDashboardData()
-  const vm = useViewModel(localData, liveData)
+  } = useDashboardData(location.pathname)
+  const vm = pageData
 
   if (loading) return <div className="screen-state">正在加载 dashboard...</div>
   if (error || !vm) return <div className="screen-state error-state">加载失败：{error || '未知错误'}</div>
 
   return (
-    <Layout vm={vm} liveLoading={liveLoading} liveError={liveError} refreshLive={refreshLive}>
+    <Layout vm={vm} pageLoading={pageLoading} pageError={vm.summary?.fallbackReason || error} refreshPage={refreshPage}>
       <Routes>
         <Route path="/" element={<Navigate to="/overview" replace />} />
-        <Route path="/overview" element={<OverviewPage vm={vm} liveError={liveError} />} />
+        <Route path="/overview" element={<OverviewPage vm={vm} />} />
         <Route path="/strategy" element={<StrategyPage vm={vm} />} />
         <Route path="/portfolio" element={<PortfolioPage vm={vm} />} />
         <Route path="/validation" element={<ValidationPage vm={vm} />} />
