@@ -158,6 +158,28 @@ function getAuditRunAt(audit, fallback = null) {
   return audit?.inputs?.now || audit?.last_run_at || fallback;
 }
 
+function hasOverlayData(baseBundle = {}) {
+  const technical = baseBundle?.technical_overlay || {};
+  const sentiment = baseBundle?.market_sentiment_overlay || {};
+  return Boolean(
+    (technical?.items && Object.keys(technical.items).length > 0)
+    || (sentiment?.items && Object.keys(sentiment.items).length > 0)
+  );
+}
+
+function resolveLatestOverlayAudit(latestAuditSelection, audits) {
+  const latestBaseBundle = latestAuditSelection?.audit?.outputs?.base_bundle || {};
+  if (hasOverlayData(latestBaseBundle)) return latestAuditSelection;
+  for (const file of audits) {
+    const audit = readJson(file.path, {});
+    const baseBundle = audit?.outputs?.base_bundle || {};
+    if (hasOverlayData(baseBundle)) {
+      return { audit, filePath: file.path, file };
+    }
+  }
+  return latestAuditSelection;
+}
+
 function resolveLatestLogPath(state, selectedAudit, logFiles) {
   const runId = selectedAudit?.audit?.run_id;
   if (runId) {
@@ -382,12 +404,16 @@ export function getDashboardData() {
   const latestAuditSelection = resolveLatestAudit(state, auditFiles, 'live');
   const latestAudit = latestAuditSelection.audit || {};
   const latestAuditOutputs = latestAudit?.outputs || {};
+  const overlayAuditSelection = resolveLatestOverlayAudit(latestAuditSelection, auditFiles);
+  const overlayAudit = overlayAuditSelection?.audit || latestAudit;
+  const overlayAuditOutputs = overlayAudit?.outputs || {};
   const latestLogPath = resolveLatestLogPath(state, latestAuditSelection, logFiles);
   const latestLogPreview = latestLogPath ? tailLines(latestLogPath, 120) : '';
   const portfolio = latestAudit?.inputs?.portfolio_data?.data?.portfolio || {};
   const holdings = latestAudit?.inputs?.portfolio_data?.data?.holdings || [];
   const latestNews = latestAudit?.inputs?.filtered_market_news || [];
   const baseBundle = latestAuditOutputs?.base_bundle || {};
+  const overlayBaseBundle = overlayAuditOutputs?.base_bundle || baseBundle;
   const latestTrades = latestAudit?.inputs?.trades_data?.data?.trades || [];
   const selectedRunAt = getAuditRunAt(latestAudit, state?.last_mode === 'live' ? state?.last_run_at : null);
   const executionSummary = buildExecutionSummary(latestAuditOutputs);
@@ -466,8 +492,10 @@ export function getDashboardData() {
         sellState: baseBundle?.sell_state || sellState || {},
         regimeFeatures: effectiveDynamicFocus?.regime_features || {},
         rebalanceNeeded: baseBundle?.rebalance_needed || false,
-        technicalOverlay: baseBundle?.technical_overlay || {},
-        marketSentimentOverlay: baseBundle?.market_sentiment_overlay || {},
+        technicalOverlay: overlayBaseBundle?.technical_overlay || {},
+        marketSentimentOverlay: overlayBaseBundle?.market_sentiment_overlay || {},
+        overlaySourceMode: overlayAudit?.mode || latestAudit?.mode || null,
+        overlaySourceRunAt: getAuditRunAt(overlayAudit, null),
       },
     },
     validationReport: validationReport,
@@ -484,6 +512,119 @@ export function getDashboardData() {
     },
     completedFeatures: buildCompletedFeatures(),
   };
+}
+
+function buildCommonPageVm(snapshot, liveData, liveError = '') {
+  const liveSummary = liveData?.summary || {};
+  const latestPostContent = snapshot?.latestRun?.audit?.outputs?.generated_post_content || snapshot?.latestRun?.state?.last_generated_post_content || '';
+  const holdings = liveSummary?.holdings?.length ? liveSummary.holdings : (snapshot?.portfolio?.holdings || []);
+  const trades = liveSummary?.trades?.length ? liveSummary.trades : (snapshot?.portfolio?.trades || []);
+  const summary = {
+    ...snapshot.summary,
+    asOf: liveSummary?.pulledAt || snapshot.summary?.lastRunAt || null,
+    totalValue: liveSummary?.portfolio?.total_value ?? snapshot.summary?.totalValue ?? null,
+    cash: liveSummary?.portfolio?.cash ?? snapshot.summary?.cash ?? null,
+    holdingsValue: liveSummary?.portfolio?.holdings_value ?? snapshot.summary?.holdingsValue ?? null,
+    returnRate: liveSummary?.portfolio?.return_rate ?? snapshot.summary?.returnRate ?? null,
+    pendingTrades: liveSummary?.tradeSummary?.pending ?? snapshot.summary?.pendingTrades ?? 0,
+    dataReady: Boolean(liveData) || Boolean(snapshot.summary?.lastRunAt),
+    fallbackReason: liveData ? '' : liveError,
+  };
+
+  const exposures = Object.entries(snapshot?.portfolio?.bucketExposures || {}).map(([name, value]) => ({
+    name,
+    value: Number(value),
+  }));
+  const auditModes = Object.entries(snapshot?.history?.validation?.counts || {}).map(([name, value]) => ({
+    name,
+    value,
+  }));
+  const assetTrend = (snapshot?.history?.audits || []).slice().reverse().map((item) => ({
+    name: item.updatedAt || item.createdAt,
+    totalValue: item.totalValue || 0,
+    returnRate: (item.returnRate || 0) * 100,
+    modeLabel: item.mode,
+  }));
+
+  return {
+    summary,
+    links: snapshot.links,
+    completedFeatures: snapshot.completedFeatures,
+    signal: snapshot.latestRun?.strategySignal || {},
+    dynamicFocus: snapshot.latestRun?.dynamicFocus || {},
+    diagnostics: snapshot.latestRun?.diagnostics || {},
+    portfolio: {
+      ...(snapshot.portfolio || {}),
+      holdings,
+      trades,
+    },
+    holdings,
+    trades,
+    exposures,
+    auditModes,
+    assetTrend,
+    history: snapshot.history,
+    news: snapshot.latestRun?.news || [],
+    latestPostContent,
+    latestLogPreview: snapshot.latestRun?.latestLogPreview || '',
+  };
+}
+
+export async function getPageData(page) {
+  const snapshot = getDashboardData();
+  let liveData = null;
+  let liveError = '';
+  try {
+    liveData = await getLiveInStreetData();
+  } catch (error) {
+    liveError = error?.message || 'live fetch failed';
+  }
+
+  const common = buildCommonPageVm(snapshot, liveData, liveError);
+
+  switch (page) {
+    case 'overview':
+      return {
+        summary: common.summary,
+        links: common.links,
+      };
+    case 'strategy':
+      return {
+        summary: common.summary,
+        signal: common.signal,
+        dynamicFocus: common.dynamicFocus,
+        diagnostics: common.diagnostics,
+        portfolio: { riskControls: snapshot?.portfolio?.riskControls || {} },
+      };
+    case 'portfolio':
+      return {
+        summary: common.summary,
+        holdings: common.holdings,
+        trades: common.trades,
+        exposures: common.exposures,
+      };
+    case 'validation':
+      return {
+        summary: common.summary,
+        auditModes: common.auditModes,
+        assetTrend: common.assetTrend,
+      };
+    case 'history':
+      return {
+        summary: common.summary,
+        history: common.history,
+        trades: common.trades,
+        news: common.news,
+        latestPostContent: common.latestPostContent,
+        latestLogPreview: common.latestLogPreview,
+      };
+    case 'config':
+      return {
+        summary: common.summary,
+      };
+    default:
+      throw new Error(`unknown page: ${page}`);
+  }
 }
 
 export async function getLiveInStreetData() {
