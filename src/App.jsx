@@ -1227,14 +1227,63 @@ function ValidationPage({ vm }) {
 }
 
 function HistoryPage({ vm }) {
+  const [selectedAuditName, setSelectedAuditName] = useState(vm.history.audits?.[0]?.fileName || '')
+  const [selectedAudit, setSelectedAudit] = useState(null)
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditError, setAuditError] = useState('')
+
+  useEffect(() => {
+    if (!selectedAuditName && vm.history.audits?.[0]?.fileName) {
+      setSelectedAuditName(vm.history.audits[0].fileName)
+    }
+  }, [selectedAuditName, vm.history.audits])
+
+  useEffect(() => {
+    if (!selectedAuditName) return
+    let aborted = false
+    async function loadAudit() {
+      try {
+        setAuditLoading(true)
+        const res = await fetch(`/api/audits/${encodeURIComponent(selectedAuditName)}`)
+        const json = await readApiResponse(res)
+        if (aborted) return
+        setSelectedAudit(json)
+        setAuditError('')
+      } catch (err) {
+        if (aborted) return
+        setAuditError(err.message || '加载审计详情失败')
+      } finally {
+        if (!aborted) setAuditLoading(false)
+      }
+    }
+    loadAudit()
+    return () => { aborted = true }
+  }, [selectedAuditName])
+
+  const outputs = selectedAudit?.outputs || {}
+  const baseBundle = outputs?.base_bundle || {}
+  const ruleProposal = baseBundle?.decision || {}
+  const finalDecision = outputs?.decision || {}
+  const llmReview = outputs?.llm_review || outputs?.llm_review_result || {}
+  const scoredCandidates = baseBundle?.candidates_scored || []
+  const exitCandidates = baseBundle?.exit_candidates || []
+  const alertLayer = baseBundle?.alert_layer || {}
+  const protectiveSellCandidate = baseBundle?.protective_sell_candidate || null
+  const protectionWatchlist = baseBundle?.protection_watchlist || []
+  const strategySignal = outputs?.strategy_signal || {}
+  const dynamicFocus = outputs?.dynamic_focus || {}
+  const execution = outputs?.trade_result?.data?.status
+    ? `${outputs.trade_result.data.status}`
+    : (outputs?.trade_error || (finalDecision?.action === 'hold' ? '未交易' : '无真实执行结果'))
+
   return (
     <div className="stack-page">
       <div className="page-grid three-col">
         <Card>
-          <SectionHeader title="最近审计记录" subtitle="最近 8 条" />
+          <SectionHeader title="最近审计记录" subtitle="点开某一轮，右侧看交易解释面板" />
           <div className="audit-list">
             {vm.history.audits.slice(0, 8).map((item) => (
-              <div key={item.fileName} className="audit-row">
+              <button key={item.fileName} type="button" className={`audit-row audit-row-button ${selectedAuditName === item.fileName ? 'active' : ''}`} onClick={() => setSelectedAuditName(item.fileName)}>
                 <div>
                   <strong>{item.fileName}</strong>
                   <div className="subline">{fmtTime(item.updatedAt)} · {mapLabel('mode', item.mode, item.mode)}</div>
@@ -1243,7 +1292,7 @@ function HistoryPage({ vm }) {
                   <Badge tone={toneForAction(item.action)}>{mapLabel('action', item.action, item.action)}</Badge>
                   <span>{mapLabel('strategyState', item.strategyState, item.strategyState)}</span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </Card>
@@ -1278,6 +1327,117 @@ function HistoryPage({ vm }) {
           </div>
         </Card>
       </div>
+
+      <Card>
+        <SectionHeader title="单笔交易可视化解释面板" subtitle="把规则提案、预警层、卖出状态机、LLM 复核和最终执行串起来看" extra={selectedAuditName ? <Badge tone="blue">{selectedAuditName}</Badge> : null} />
+        {auditLoading ? <div className="screen-state">正在加载该轮审计详情…</div> : null}
+        {!auditLoading && auditError ? <div className="screen-state error-state">审计详情加载失败：{auditError}</div> : null}
+        {!auditLoading && !auditError && selectedAudit ? (
+          <div className="stack-page">
+            <div className="explain-flow-grid">
+              <div className="flow-step"><span>1</span><div><strong>规则提案</strong><p>{mapLabel('action', ruleProposal?.action, ruleProposal?.action || '未知')}：{ruleProposal?.reason || '暂无'}</p></div></div>
+              <div className="flow-step"><span>2</span><div><strong>预警 / 状态机</strong><p>{protectiveSellCandidate ? `保护性减仓候选：${protectiveSellCandidate.name}（${protectiveSellCandidate.streak || 0}/${protectiveSellCandidate.required_runs || 0}）` : `${alertLayer?.summary?.total || 0} 条预警 / ${protectionWatchlist.length} 个保护观察`}</p></div></div>
+              <div className="flow-step"><span>3</span><div><strong>LLM 复核</strong><p>{llmReview?.enabled ? `${mapLabel('action', llmReview?.action, llmReview?.action || '未知')}：${llmReview?.reason || '暂无'}` : '关闭或未触发'}</p></div></div>
+              <div className="flow-step"><span>4</span><div><strong>最终执行</strong><p>{mapLabel('action', finalDecision?.action, finalDecision?.action || '未知')} / {execution}</p></div></div>
+            </div>
+
+            <div className="page-grid two-col">
+              <Card>
+                <SectionHeader title="最终动作" subtitle="先看最后做了什么，再往回拆原因" />
+                <div className="decision-banner">
+                  <div>
+                    <div className="banner-label">最终结论</div>
+                    <div className="banner-value smallish">{mapLabel('action', finalDecision?.action, finalDecision?.action || '未知')}</div>
+                  </div>
+                  <Badge tone={toneForAction(finalDecision?.action)}>{execution}</Badge>
+                </div>
+                <p className="banner-reason">{finalDecision?.decision_reason || finalDecision?.reason || '暂无'}</p>
+                <div className="kv-list compact top-space">
+                  <div><span>规则层原始提案</span><strong>{mapLabel('action', ruleProposal?.action, ruleProposal?.action || '未知')}</strong></div>
+                  <div><span>最终动作</span><strong>{mapLabel('action', finalDecision?.action, finalDecision?.action || '未知')}</strong></div>
+                  <div><span>策略状态</span><strong>{mapLabel('strategyState', strategySignal?.state, strategySignal?.state || '未知')}</strong></div>
+                  <div><span>市场结构</span><strong>{mapLabel('regime', dynamicFocus?.market_regime, dynamicFocus?.market_regime || '未知')}</strong></div>
+                </div>
+              </Card>
+
+              <Card>
+                <SectionHeader title="为什么会这样" subtitle="把影响动作的关键驱动压缩成几个最重要的解释点" />
+                <div className="chips vertical">
+                  {ruleProposal?.reason ? <span className="chip chip-primary">规则提案：{ruleProposal.reason}</span> : null}
+                  {finalDecision?.decision_reason && finalDecision?.decision_reason !== ruleProposal?.reason ? <span className="chip chip-primary">最终决策：{finalDecision.decision_reason}</span> : null}
+                  {protectiveSellCandidate ? <span className="chip chip-danger">保护性减仓：{protectiveSellCandidate.alert?.headline}</span> : null}
+                  {llmReview?.reason ? <span className={`chip ${llmReview?.action === 'hold' && finalDecision?.action === 'hold' && ruleProposal?.action !== 'hold' ? 'chip-danger' : 'chip-primary'}`}>LLM 复核：{llmReview.reason}</span> : null}
+                  {!ruleProposal?.reason && !protectiveSellCandidate && !llmReview?.reason ? <span className="chip">当前没有可展开的额外解释</span> : null}
+                </div>
+              </Card>
+            </div>
+
+            <div className="page-grid two-col">
+              <Card>
+                <SectionHeader title="候选打分 Top 3" subtitle="看这轮系统最想买什么，以及预警层有没有改分" />
+                <div className="focus-stack">
+                  {scoredCandidates.slice(0, 3).map((item) => (
+                    <article key={item.symbol} className="focus-card">
+                      <div className="focus-head"><strong>{item.name}</strong><span>{item.symbol} / 总分 {item.score}</span></div>
+                      <p>{mapLabel('bucket', item.bucket, item.bucket)} · {mapLabel('layer', item.layer, item.layer)}</p>
+                      {item.raw_score !== undefined ? <div className="subline">原始分 {item.raw_score} / 预警调整 {item.alert_adjustment > 0 ? '+' : ''}{item.alert_adjustment || 0}</div> : null}
+                      <div className="chips vertical top-space">
+                        {(item.score_breakdown || []).slice(0, 5).map((part, idx) => (
+                          <span key={`${item.symbol}-${idx}`} className={`chip ${part.delta >= 0 ? 'chip-primary' : 'chip-danger'}`}>{part.label}: {part.delta > 0 ? '+' : ''}{part.delta}</span>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                  {!scoredCandidates.length ? <div className="subline">该轮没有候选打分明细</div> : null}
+                </div>
+              </Card>
+
+              <Card>
+                <SectionHeader title="卖出 / 保护链路" subtitle="看这轮是否进入卖出状态机、保护观察或保护性减仓" />
+                <div className="focus-stack">
+                  {protectiveSellCandidate ? (
+                    <article className="focus-card">
+                      <div className="focus-head"><strong>{protectiveSellCandidate.name}</strong><Badge tone={protectiveSellCandidate.state === 'ready_to_trim' ? 'red' : 'amber'}>{mapLabel('sellState', protectiveSellCandidate.state, protectiveSellCandidate.state)}</Badge></div>
+                      <p>{protectiveSellCandidate.decision_reason}</p>
+                    </article>
+                  ) : null}
+                  {exitCandidates.slice(0, 3).map((item) => (
+                    <article key={item.symbol} className="focus-card">
+                      <div className="focus-head"><strong>{item.name}</strong><Badge tone={item.sell_state?.state?.includes('ready') ? 'red' : 'amber'}>{mapLabel('sellState', item.sell_state?.state, item.sell_state?.state || 'observe_exit')}</Badge></div>
+                      <p>{item.decision_reason}</p>
+                    </article>
+                  ))}
+                  {protectionWatchlist.slice(0, 3).map((item) => (
+                    <article key={`watch-${item.symbol}`} className="focus-card">
+                      <div className="focus-head"><strong>{item.name}</strong><Badge tone="red">保护观察</Badge></div>
+                      <p>{item.headline}</p>
+                      <div className="subline">{item.summary}</div>
+                    </article>
+                  ))}
+                  {!protectiveSellCandidate && !exitCandidates.length && !protectionWatchlist.length ? <div className="subline">该轮没有明显卖出 / 保护链路信号</div> : null}
+                </div>
+              </Card>
+            </div>
+
+            <div className="page-grid two-col">
+              <Card>
+                <SectionHeader title="该轮预警快照" subtitle="复盘这轮到底是哪些预警在推着系统动" />
+                <AlertFeed alerts={(alertLayer?.alerts || []).slice(0, 6)} emptyText="该轮没有高优先级预警" />
+              </Card>
+              <Card>
+                <SectionHeader title="LLM 复核详情" subtitle="看模型是批准、否决，还是只是补充解释" />
+                <div className="kv-list compact">
+                  <div><span>是否启用</span><strong>{llmReview?.enabled ? '是' : '否'}</strong></div>
+                  <div><span>模型动作</span><strong>{mapLabel('action', llmReview?.action, llmReview?.action || '未知')}</strong></div>
+                  <div><span>复核结论</span><strong>{llmReview?.reason || '暂无'}</strong></div>
+                  <div><span>信息面总结</span><strong>{llmReview?.raw?.news_view || '暂无'}</strong></div>
+                  <div><span>风险提示</span><strong>{llmReview?.raw?.risk_note || '暂无'}</strong></div>
+                </div>
+              </Card>
+            </div>
+          </div>
+        ) : null}
+      </Card>
 
       <div className="page-grid three-col">
         <Card>

@@ -402,6 +402,10 @@ a { color: inherit; text-decoration: none; }
 .flow-step span { width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; background: #dbeafe; color: #1d4ed8; font-weight: 800; flex: 0 0 auto; }
 
 .audit-row, .trade-row { padding: 14px 16px; border-radius: 18px; }
+.audit-row-button { width: 100%; text-align: left; cursor: pointer; }
+.audit-row-button:hover { border-color: #93c5fd; box-shadow: 0 14px 34px rgba(37,99,235,0.10); }
+.audit-row-button.active { border-color: #2563eb; background: linear-gradient(135deg, #eff6ff, #ffffff); }
+.explain-flow-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .news-card { display: block; padding: 14px 16px; border-radius: 18px; background: linear-gradient(180deg, #ffffff, #f8fafc); border: 1px solid var(--line); }
 .news-card span { display: block; margin-bottom: 8px; }
 .console-block { margin: 0; padding: 16px; max-height: 420px; overflow: auto; border-radius: 18px; background: linear-gradient(180deg, #08111f, #111827); color: #e2e8f0; font-size: 12px; line-height: 1.7; }
@@ -423,6 +427,7 @@ a { color: inherit; text-decoration: none; }
   .page-grid.two-col,
   .page-grid.three-col,
   .audit-flow,
+  .explain-flow-grid,
   .config-command-bar { grid-template-columns: 1fr; }
   .stats-grid.v2, .stats-grid.compact, .mini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
