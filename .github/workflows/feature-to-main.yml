@@ -1,12 +1,12 @@
-name: Release to Main
+name: Feature to Main
 
 on:
   push:
     branches:
-      - release
+      - 'feature/**'
 
 concurrency:
-  group: release-to-main
+  group: feature-to-main-${{ github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -14,40 +14,42 @@ permissions:
   pull-requests: write
 
 jobs:
-  promote-release-to-main:
+  create-pr-to-main:
     runs-on: ubuntu-latest
     steps:
-      - name: Create or update PR from release to main
+      - name: Create or update PR from feature to main
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
         run: |
-          PR_NUMBER=$(gh pr list --repo "$REPO" --base main --head release --json number --jq '.[0].number')
+          PR_NUMBER=$(gh pr list --repo "$REPO" --base main --head "$BRANCH" --json number --jq '.[0].number')
           if [ -z "$PR_NUMBER" ]; then
-            AHEAD_BY=$(gh api repos/$REPO/compare/main...release --jq '.ahead_by')
+            AHEAD_BY=$(gh api repos/$REPO/compare/main...$BRANCH --jq '.ahead_by')
             if [ "$AHEAD_BY" = "0" ]; then
-              echo "Release has no new commits to promote to main"
+              echo "No new commits to promote from $BRANCH to main"
               exit 0
             fi
             gh pr create \
               --repo "$REPO" \
               --base main \
-              --head release \
-              --title "release: promote release to main" \
-              --body "Auto-created from release branch push.\n\nFlow: feature -> release -> main"
-            PR_NUMBER=$(gh pr list --repo "$REPO" --base main --head release --json number --jq '.[0].number')
+              --head "$BRANCH" \
+              --title "feat: $BRANCH" \
+              --body "Auto-created from feature branch push: $BRANCH. Flow: feature -> main"
+            PR_NUMBER=$(gh pr list --repo "$REPO" --base main --head "$BRANCH" --json number --jq '.[0].number')
           fi
-          echo "Using PR #$PR_NUMBER"
+          echo "Created/Using PR number $PR_NUMBER"
 
       - name: Wait for required PR checks and merge to main
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
         run: |
-          PR_NUMBER=$(gh pr list --repo "$REPO" --base main --head release --json number --jq '.[0].number')
+          PR_NUMBER=$(gh pr list --repo "$REPO" --base main --head "$BRANCH" --json number --jq '.[0].number')
           export PR_NUMBER
           if [ -z "$PR_NUMBER" ]; then
-            echo "No open PR found for release -> main"
+            echo "No open PR found for $BRANCH -> main"
             exit 0
           fi
 
@@ -58,25 +60,25 @@ jobs:
             MERGE_STATE=$(echo "$PR_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("mergeStateStatus") or "UNKNOWN")')
 
             if [ "$STATE" != "OPEN" ]; then
-              echo "PR #$PR_NUMBER is already $STATE"
+              echo "PR number $PR_NUMBER is already $STATE"
               exit 0
             fi
 
             if [ "$MERGEABLE" = "CONFLICTING" ] || [ "$MERGE_STATE" = "DIRTY" ]; then
-              echo "PR #$PR_NUMBER has merge conflicts against main"
+              echo "PR number $PR_NUMBER has merge conflicts against main"
               echo "$PR_JSON"
               exit 1
             fi
 
-            COUNTS=$(echo "$PR_JSON" | python3 -c 'import sys,json; data=json.load(sys.stdin); relevant=[c for c in data.get("statusCheckRollup", []) if c.get("name") != "promote-release-to-main"]; failed=sum(1 for c in relevant if c.get("status") == "COMPLETED" and c.get("conclusion") not in (None, "", "SUCCESS", "SKIPPED", "NEUTRAL")); pending=sum(1 for c in relevant if c.get("status") != "COMPLETED"); print(json.dumps({"total": len(relevant), "pending": pending, "failed": failed}, ensure_ascii=False))')
+            COUNTS=$(echo "$PR_JSON" | python3 -c 'import sys,json; data=json.load(sys.stdin); relevant=[c for c in data.get("statusCheckRollup", []) if c.get("name") != "create-pr-to-main"]; failed=sum(1 for c in relevant if c.get("status") == "COMPLETED" and c.get("conclusion") not in (None, "", "SUCCESS", "SKIPPED", "NEUTRAL")); pending=sum(1 for c in relevant if c.get("status") != "COMPLETED"); print(json.dumps({"total": len(relevant), "pending": pending, "failed": failed}, ensure_ascii=False))')
             TOTAL=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["total"])')
             PENDING=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["pending"])')
             FAILED=$(echo "$COUNTS" | python3 -c 'import sys,json; print(json.load(sys.stdin)["failed"])')
 
-            echo "PR #$PR_NUMBER mergeable:$MERGEABLE mergeState:$MERGE_STATE required PR checks => total:$TOTAL pending:$PENDING failed:$FAILED"
+            echo "PR number $PR_NUMBER mergeable:$MERGEABLE mergeState:$MERGE_STATE required PR checks => total:$TOTAL pending:$PENDING failed:$FAILED"
 
             if [ "$FAILED" != "0" ]; then
-              echo "PR #$PR_NUMBER has failing required PR checks"
+              echo "PR number $PR_NUMBER has failing required PR checks"
               echo "$PR_JSON"
               exit 1
             fi
@@ -96,6 +98,6 @@ jobs:
             sleep 10
           done
 
-          echo "Timed out waiting for PR #$PR_NUMBER required PR checks to finish"
+          echo "Timed out waiting for PR number $PR_NUMBER required PR checks to finish"
           gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup
           exit 1

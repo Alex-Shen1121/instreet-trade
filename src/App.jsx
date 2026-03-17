@@ -1,5 +1,4 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import './App.css'
 
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6']
@@ -506,8 +505,7 @@ function useDashboardData(pathname) {
   }
 }
 
-function Layout({ vm, pageLoading, pageError, refreshPage, children }) {
-  const location = useLocation()
+function Layout({ vm, tabs, activeTab, onOpenTab, onCloseTab, pageLoading, pageError, refreshPage, children }) {
   return (
     <div className="app-shell grain">
       <aside className="sidebar">
@@ -521,10 +519,15 @@ function Layout({ vm, pageLoading, pageError, refreshPage, children }) {
 
         <nav className="sidebar-nav">
           {NAV_ITEMS.map((item) => (
-            <NavLink key={item.to} to={item.to} className={({ isActive }) => (isActive ? 'active' : '')}>
+            <button
+              key={item.to}
+              type="button"
+              className={`sidebar-nav-item ${activeTab === item.to ? 'active' : ''}`}
+              onClick={() => onOpenTab(item.to, item.label)}
+            >
               <strong>{item.label}</strong>
               <span>{item.desc}</span>
-            </NavLink>
+            </button>
           ))}
         </nav>
 
@@ -545,9 +548,30 @@ function Layout({ vm, pageLoading, pageError, refreshPage, children }) {
           {pageError ? <div className="inline-error">{pageError}</div> : null}
         </div>
 
-        <div className="sidebar-footnote">当前页面：{NAV_ITEMS.find((item) => item.to === location.pathname)?.label || '总览'}</div>
+        <div className="sidebar-footnote">当前页面：{tabs.find((t) => t.path === activeTab)?.label || '总览'}</div>
       </aside>
-      <main className="main-content">{children}</main>
+      <main className="main-content">
+        <div className="tab-strip">
+          {tabs.map((tab) => (
+            <div
+              key={tab.path}
+              className={`tab-item ${activeTab === tab.path ? 'active' : ''}`}
+              onClick={() => onOpenTab(tab.path, tab.label)}
+            >
+              <span className="tab-label">{tab.label}</span>
+              <button
+                type="button"
+                className="tab-close"
+                onClick={(e) => onCloseTab(tab.path, e)}
+                aria-label={`关闭 ${tab.label}`}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="tab-content">{children}</div>
+      </main>
     </div>
   )
 }
@@ -1281,7 +1305,9 @@ function ConfigPage({ configData, configLoading, configError, saveMessage, savin
 }
 
 function App() {
-  const location = useLocation()
+  const [tabs, setTabs] = useState([{ path: '/overview', label: '总览' }])
+  const [activeTab, setActiveTab] = useState('/overview')
+
   const {
     pageData,
     configData,
@@ -1297,23 +1323,68 @@ function App() {
     updateManifest,
     updateProfile,
     updateActiveProfile,
-  } = useDashboardData(location.pathname)
+  } = useDashboardData(activeTab)
   const vm = pageData
+
+  const openTab = useCallback((path, label) => {
+    setTabs((prev) => {
+      const existing = prev.find((t) => t.path === path)
+      if (existing) {
+        setActiveTab(path)
+        return prev
+      }
+      return [...prev, { path, label }]
+    })
+    setActiveTab(path)
+  }, [])
+
+  const closeTab = useCallback((path, e) => {
+    e?.stopPropagation()
+    setTabs((prev) => {
+      const newTabs = prev.filter((t) => t.path !== path)
+      if (activeTab === path && newTabs.length > 0) {
+        const idx = prev.findIndex((t) => t.path === path)
+        const newActive = newTabs[Math.max(0, idx - 1)]?.path || newTabs[0]?.path
+        setActiveTab(newActive)
+      }
+      return newTabs
+    })
+  }, [activeTab])
 
   if (loading) return <div className="screen-state">正在加载 dashboard...</div>
   if (error || !vm) return <div className="screen-state error-state">加载失败：{error || '未知错误'}</div>
 
+  const renderPage = () => {
+    switch (activeTab) {
+      case '/overview':
+        return <OverviewPage vm={vm} />
+      case '/strategy':
+        return <StrategyPage vm={vm} />
+      case '/portfolio':
+        return <PortfolioPage vm={vm} />
+      case '/validation':
+        return <ValidationPage vm={vm} />
+      case '/history':
+        return <HistoryPage vm={vm} />
+      case '/config':
+        return <ConfigPage configData={configData} configLoading={configLoading} configError={configError} saveMessage={saveMessage} saving={saving} onRefresh={refreshConfig} onUpdateManifest={updateManifest} onUpdateProfile={updateProfile} onUpdateActiveProfile={updateActiveProfile} />
+      default:
+        return <OverviewPage vm={vm} />
+    }
+  }
+
   return (
-    <Layout vm={vm} pageLoading={pageLoading} pageError={vm.summary?.fallbackReason || error} refreshPage={refreshPage}>
-      <Routes>
-        <Route path="/" element={<Navigate to="/overview" replace />} />
-        <Route path="/overview" element={<OverviewPage vm={vm} />} />
-        <Route path="/strategy" element={<StrategyPage vm={vm} />} />
-        <Route path="/portfolio" element={<PortfolioPage vm={vm} />} />
-        <Route path="/validation" element={<ValidationPage vm={vm} />} />
-        <Route path="/history" element={<HistoryPage vm={vm} />} />
-        <Route path="/config" element={<ConfigPage configData={configData} configLoading={configLoading} configError={configError} saveMessage={saveMessage} saving={saving} onRefresh={refreshConfig} onUpdateManifest={updateManifest} onUpdateProfile={updateProfile} onUpdateActiveProfile={updateActiveProfile} />} />
-      </Routes>
+    <Layout
+      vm={vm}
+      tabs={tabs}
+      activeTab={activeTab}
+      onOpenTab={openTab}
+      onCloseTab={closeTab}
+      pageLoading={pageLoading}
+      pageError={vm.summary?.fallbackReason || error}
+      refreshPage={refreshPage}
+    >
+      {renderPage()}
     </Layout>
   )
 }
