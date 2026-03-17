@@ -504,7 +504,7 @@ function useDashboardData(pathname) {
 
   const loadShell = useCallback(async (initial = false) => {
     try {
-      if (initial && !shellData) setLoading(true)
+      if (initial) setLoading(true)
       const res = await fetch('/api/shell')
       const json = await readApiResponse(res)
       setShellData(json)
@@ -516,7 +516,7 @@ function useDashboardData(pathname) {
     } finally {
       if (initial) setLoading(false)
     }
-  }, [shellData])
+  }, [])
 
   const loadPage = useCallback(async (currentPage, initial = false) => {
     try {
@@ -553,14 +553,18 @@ function useDashboardData(pathname) {
   const activePageData = pageCache[pageKey] || null
 
   useEffect(() => {
-    loadShell(!shellData).catch(() => {})
-    const timer = setInterval(() => loadShell(), 30000)
+    if (!shellData) {
+      loadShell(true).catch(() => {})
+    }
+    const timer = setInterval(() => loadShell().catch(() => {}), 30000)
     return () => clearInterval(timer)
   }, [loadShell, shellData])
 
   useEffect(() => {
-    loadPage(pageKey, !activePageData && !shellData).catch(() => {})
-    const timer = setInterval(() => loadPage(pageKey), 30000)
+    if (!activePageData) {
+      loadPage(pageKey, !shellData).catch(() => {})
+    }
+    const timer = setInterval(() => loadPage(pageKey).catch(() => {}), 30000)
     return () => clearInterval(timer)
   }, [pageKey, loadPage, activePageData, shellData])
 
