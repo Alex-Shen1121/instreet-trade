@@ -364,7 +364,12 @@ function Table({ columns, rows, rowKey }) {
 }
 
 function InfoHint({ text }) {
-  return <span className="info-hint" title={text}>!</span>
+  return (
+    <span className="info-hint" tabIndex={0} aria-label={text}>
+      <span className="info-hint-icon" aria-hidden="true">?</span>
+      <span className="info-tooltip" role="tooltip">{text}</span>
+    </span>
+  )
 }
 
 function getIn(obj, path) {
@@ -1207,84 +1212,118 @@ function WatchlistCard({ title, subtitle, source, onSave, saving }) {
 }
 
 function ConfigPage({ configData, configLoading, configError, saveMessage, saving, onRefresh, onUpdateManifest, onUpdateProfile, onUpdateActiveProfile }) {
+  const [activeTab, setActiveTab] = useState('engine')
+
   if (configLoading && !configData) return <div className="screen-state">正在加载策略配置…</div>
   if (!configData) return <div className="screen-state error-state">配置加载失败：{configError || '未知错误'}</div>
 
   const activeProfile = configData.profiles.find((item) => item.profile_id === configData.activeProfileId) || configData.profiles[0]
+  const tabItems = [
+    { key: 'engine', label: '全局引擎', desc: `${MANIFEST_SECTION_DEFS.length} 组运行参数` },
+    { key: 'profile', label: '当前策略模板', desc: activeProfile ? activeProfile.label : '暂无 active profile' },
+    { key: 'watchlist', label: '固定股票池', desc: `${activeProfile?.watchlist?.length || 0} 个标的` },
+  ]
 
   return (
     <div className="stack-page config-page">
-      <header className="hero-v2 config-hero">
-        <div className="hero-copy-block">
+      <header className="config-command-bar">
+        <div className="config-command-copy">
           <div className="hero-eyebrow">策略配置中心 / Live Editable</div>
-          <h2>看清每套量化策略的关键参数，也能直接在线调整</h2>
+          <h2>把配置页改成真正可读、可调、可解释的控制台</h2>
           <p>
-            这里会直接读取真实策略配置文件。你可以切换量化大策略，也可以在线调整阈值、仓位、卖出规则和候选池权重。
-            带感叹号的地方是容易误解的概念解释。
+            这版不再把所有内容都挤成一长串卡片，而是拆成“全局引擎 / 当前策略模板 / 固定股票池”三块。
+            感叹号也改成了前端自带 tooltip，鼠标移上去或键盘聚焦时可以直接看到解释文字。
           </p>
         </div>
-        <div className="hero-status-grid">
-          <div className="hero-status-card bright">
+
+        <div className="config-command-side">
+          <div className="command-metric active">
             <span>下次运行将使用</span>
             <strong>{mapLabel('profile', configData.activeProfileId, activeProfile?.label || configData.activeProfileId)}</strong>
             <small>{activeProfile?.thesis || '暂无策略说明'}</small>
           </div>
-          <div className="hero-status-card">
+          <div className="command-metric">
             <span>配置源</span>
             <strong>{configData.strategyRoot}</strong>
             <small>修改后会直接写回 JSON 配置文件</small>
           </div>
-          <div className="hero-status-card">
+          <div className="command-metric">
             <span>保存状态</span>
             <strong>{saveMessage || '尚未修改'}</strong>
-            <small>{configError || '你也可以手动刷新配置数据'}</small>
+            <small>{configError || '需要时可以手动刷新配置数据'}</small>
           </div>
         </div>
       </header>
 
-      <Card>
-        <SectionHeader title="量化大策略切换" subtitle="切换 active profile，影响下一轮策略运行所采用的大策略模板。" extra={<button className="ghost-inline-button" onClick={onRefresh}>刷新配置</button>} />
-        <div className="profile-switch-grid">
-          {configData.profileOptions.map((profile) => (
-            <article key={profile.profile_id} className={`profile-switch-card ${configData.activeProfileId === profile.profile_id ? 'active' : ''}`}>
-              <div>
-                <strong>{profile.label}</strong>
-                <div className="subline">{profile.profile_id}</div>
-              </div>
-              <p>{profile.thesis}</p>
-              <button className="save-button slim" disabled={saving || configData.activeProfileId === profile.profile_id} onClick={() => onUpdateActiveProfile(profile.profile_id)}>
-                {configData.activeProfileId === profile.profile_id ? '当前策略' : '切到这套策略'}
-              </button>
-            </article>
+      <section className="config-toolbar-shell">
+        <div className="config-tabs" role="tablist" aria-label="配置分区切换">
+          {tabItems.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.key}
+              className={`config-tab ${activeTab === tab.key ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              <strong>{tab.label}</strong>
+              <span>{tab.desc}</span>
+            </button>
           ))}
         </div>
-      </Card>
+        <div className="config-toolbar-actions">
+          <Badge tone={saving ? 'amber' : 'blue'}>{saving ? '保存中' : '可编辑'}</Badge>
+          <button className="ghost-inline-button" onClick={onRefresh}>刷新配置</button>
+        </div>
+      </section>
 
-      <div className="page-grid two-col">
-        {MANIFEST_SECTION_DEFS.map((section) => (
-          <ConfigSectionCard
-            key={section.key}
-            title={section.title}
-            subtitle={section.subtitle}
-            source={configData.manifest?.[section.key]}
-            fields={section.fields}
-            saving={saving}
-            onSave={(patch) => onUpdateManifest({ [section.key]: patch })}
-          />
-        ))}
-      </div>
-
-      {activeProfile ? (
-        <>
-          <Card>
-            <SectionHeader title={`当前编辑策略：${activeProfile.label}`} subtitle="下面这部分是 active profile 的核心参数，改完会直接写回对应 profile JSON。" />
-            <div className="kv-list compact">
-              <div><span>profile_id</span><strong>{activeProfile.profile_id}</strong></div>
-              <div><span>当前 thesis</span><strong>{activeProfile.thesis}</strong></div>
+      {activeTab === 'engine' ? (
+        <div className="config-stage stack-page">
+          <Card className="card-flat card-highlight">
+            <SectionHeader title="量化大策略切换" subtitle="先决定下一轮策略运行用哪一套模板，再细调参数。" />
+            <div className="profile-switch-grid">
+              {configData.profileOptions.map((profile) => (
+                <article key={profile.profile_id} className={`profile-switch-card ${configData.activeProfileId === profile.profile_id ? 'active' : ''}`}>
+                  <div>
+                    <strong>{profile.label}</strong>
+                    <div className="subline">{profile.profile_id}</div>
+                  </div>
+                  <p>{profile.thesis}</p>
+                  <button className="save-button slim" disabled={saving || configData.activeProfileId === profile.profile_id} onClick={() => onUpdateActiveProfile(profile.profile_id)}>
+                    {configData.activeProfileId === profile.profile_id ? '当前策略' : '切到这套策略'}
+                  </button>
+                </article>
+              ))}
             </div>
           </Card>
 
-          <div className="page-grid two-col">
+          <div className="page-grid two-col config-section-grid">
+            {MANIFEST_SECTION_DEFS.map((section) => (
+              <ConfigSectionCard
+                key={section.key}
+                title={section.title}
+                subtitle={section.subtitle}
+                source={configData.manifest?.[section.key]}
+                fields={section.fields}
+                saving={saving}
+                onSave={(patch) => onUpdateManifest({ [section.key]: patch })}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === 'profile' && activeProfile ? (
+        <div className="config-stage stack-page">
+          <Card className="card-flat card-highlight">
+            <SectionHeader title={`当前编辑策略：${activeProfile.label}`} subtitle="这一页只展示 active profile 的核心模板参数，方便集中调这一套策略。" />
+            <div className="stats-grid compact two-up profile-summary-grid">
+              <StatCard label="profile_id" value={activeProfile.profile_id} hint="修改时会直接写回对应 profile JSON" tone="purple" />
+              <StatCard label="固定股票池" value={`${activeProfile.watchlist?.length || 0} 个`} hint="包含 symbol / bucket / layer / preferred" tone="blue" />
+            </div>
+          </Card>
+
+          <div className="page-grid two-col config-section-grid">
             {PROFILE_SECTION_DEFS.map((section) => (
               <ConfigSectionCard
                 key={section.key}
@@ -1311,19 +1350,19 @@ function ConfigPage({ configData, configLoading, configError, saveMessage, savin
               onSave={(patch) => onUpdateProfile(activeProfile.profile_id, { bucket_minimums: patch })}
             />
           </div>
+        </div>
+      ) : null}
 
-          <Card>
-            <SectionHeader
-              title="固定股票池 (Watchlist)"
-              subtitle="该策略的固定关注股票列表，包含 symbol、名称、分类、是否偏好、所在层级。"
-            />
-            <WatchlistCard
-              source={activeProfile.watchlist || []}
-              saving={saving}
-              onSave={(patch) => onUpdateProfile(activeProfile.profile_id, { watchlist: patch })}
-            />
-          </Card>
-        </>
+      {activeTab === 'watchlist' && activeProfile ? (
+        <div className="config-stage stack-page">
+          <WatchlistCard
+            title="固定股票池 (Watchlist)"
+            subtitle="把 symbol、分类、偏好和层级放到一个更像表格编辑器的区域里，而不是继续塞进竖向卡片流。"
+            source={activeProfile.watchlist || []}
+            saving={saving}
+            onSave={(patch) => onUpdateProfile(activeProfile.profile_id, { watchlist: patch })}
+          />
+        </div>
       ) : null}
     </div>
   )
