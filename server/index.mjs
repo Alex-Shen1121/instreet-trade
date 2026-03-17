@@ -87,6 +87,11 @@ app.get('/api/logs/:name', (req, res) => {
   res.json(data);
 });
 
+app.get('/api/validation-report', (_req, res) => {
+  const data = getDashboardData();
+  res.json(data.validationReport || { error: 'no validation report yet' });
+});
+
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(distDir));
   app.get(/^(?!\/api).*/, (_req, res) => {
