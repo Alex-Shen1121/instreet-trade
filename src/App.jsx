@@ -464,8 +464,131 @@ function Card({ children, className = '' }) {
   return <section className={`card ${className}`.trim()}>{children}</section>
 }
 
+function PaginationControls({ page, totalPages, onPageChange, label }) {
+  if (totalPages <= 1) return null
+  return (
+    <div className="pagination-bar">
+      <span className="pagination-copy">{label} · 第 {page} / {totalPages} 页</span>
+      <div className="pagination-actions">
+        <button type="button" className="ghost-inline-button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>上一页</button>
+        <button type="button" className="ghost-inline-button" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>下一页</button>
+      </div>
+    </div>
+  )
+}
+
+function AuditTimelineTable({ items, selectedAuditName, onOpenAudit }) {
+  if (!items.length) return <div className="subline">暂无审计记录</div>
+  return (
+    <div className="audit-timeline-table" role="table" aria-label="最近审计记录">
+      <div className="audit-timeline-head" role="row">
+        <span>时间</span>
+        <span>审计文件</span>
+        <span>模式</span>
+        <span>动作</span>
+        <span>策略状态</span>
+      </div>
+      <div className="audit-timeline-body">
+        {items.map((item) => (
+          <button
+            key={item.fileName}
+            type="button"
+            className={`audit-timeline-row ${selectedAuditName === item.fileName ? 'active' : ''}`}
+            onClick={() => onOpenAudit(item.fileName)}
+          >
+            <div className="audit-timeline-cell audit-timeline-time">
+              <span className="timeline-dot" aria-hidden="true" />
+              <div>
+                <strong>{fmtTime(item.updatedAt)}</strong>
+                <small>{item.fileName.replace('.json', '')}</small>
+              </div>
+            </div>
+            <div className="audit-timeline-cell audit-timeline-file">
+              <strong>{item.fileName}</strong>
+              <span className="subline action-link-text">点开查看六阶段链路 / 鱼骨图 / 细节点</span>
+            </div>
+            <div className="audit-timeline-cell">
+              <Badge tone="slate">{mapLabel('mode', item.mode, item.mode)}</Badge>
+            </div>
+            <div className="audit-timeline-cell">
+              <Badge tone={toneForAction(item.action)}>{mapLabel('action', item.action, item.action)}</Badge>
+            </div>
+            <div className="audit-timeline-cell">
+              <span>{mapLabel('strategyState', item.strategyState, item.strategyState)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function TradeTimelineTable({ items, onOpenTrade }) {
+  if (!items.length) return <div className="subline">暂无交易记录</div>
+  return (
+    <div className="audit-timeline-table trade-timeline-table" role="table" aria-label="最近交易">
+      <div className="audit-timeline-head" role="row">
+        <span>时间</span>
+        <span>标的</span>
+        <span>状态</span>
+        <span>动作</span>
+        <span>股数</span>
+      </div>
+      <div className="audit-timeline-body">
+        {items.map((item, idx) => {
+          const rowTime = item.updatedAt || item.createdAt || item.time || item.trade_time || item.submit_time || item.executed_at || ''
+          return (
+            <button
+              key={`${item.symbol || idx}-${idx}`}
+              type="button"
+              className="audit-timeline-row trade-timeline-row"
+              onClick={() => onOpenTrade(item)}
+            >
+              <div className="audit-timeline-cell audit-timeline-time">
+                <span className="timeline-dot trade" aria-hidden="true" />
+                <div>
+                  <strong>{rowTime ? fmtTime(rowTime) : '—'}</strong>
+                  <small>{item.symbol || '未知代码'}</small>
+                </div>
+              </div>
+              <div className="audit-timeline-cell audit-timeline-file">
+                <strong>{item.name || item.symbol || '未知标的'}</strong>
+                <span className="subline action-link-text">点开后聚焦状态机 / 风险解释 / 关联审计</span>
+              </div>
+              <div className="audit-timeline-cell">
+                <Badge tone="slate">{mapLabel('status', item.status, item.status || '未知')}</Badge>
+              </div>
+              <div className="audit-timeline-cell">
+                <Badge tone={toneForAction(item.action)}>{mapLabel('action', item.action, item.action)}</Badge>
+              </div>
+              <div className="audit-timeline-cell">
+                <span>{item.shares || 0} 股</span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function ChartFallback({ height = 300, text = '图表加载中…' }) {
   return <div className="chart-fallback" style={{ minHeight: `${height}px` }}>{text}</div>
+}
+
+function formatReasonItem(reason) {
+  if (reason == null) return '—'
+  if (typeof reason === 'string' || typeof reason === 'number') return String(reason)
+  if (typeof reason === 'object') {
+    if (reason.detail) return reason.detail
+    if (reason.label) return reason.label
+    try {
+      return JSON.stringify(reason)
+    } catch {
+      return '复杂原因对象'
+    }
+  }
+  return String(reason)
 }
 
 function Table({ columns, rows, rowKey }) {
@@ -517,6 +640,641 @@ function AlertFeed({ alerts = [], emptyText = '当前没有预警' }) {
           ) : null}
         </article>
       ))}
+    </div>
+  )
+}
+
+function ScoreWaterfall({ candidate, threshold = 0 }) {
+  if (!candidate || candidate.score === undefined) return <div className="subline">该轮没有足够完整的候选打分轨迹可展示。</div>
+  const finalScore = Number(candidate.score || 0)
+  const rawScore = Number(candidate.raw_score ?? (finalScore - Number(candidate.alert_adjustment || 0)))
+  const adjustment = Number(candidate.alert_adjustment || 0)
+  const maxAbs = Math.max(Math.abs(rawScore), Math.abs(finalScore), Math.abs(adjustment), Math.abs(Number(threshold || 0)), 1)
+  const rows = [
+    { label: '原始规则分', value: rawScore, tone: 'blue' },
+    { label: '预警层调整', value: adjustment, tone: adjustment >= 0 ? 'green' : 'red', signed: true },
+    { label: '最终候选分', value: finalScore, tone: finalScore >= Number(threshold || 0) ? 'green' : 'amber' },
+    { label: '买入阈值', value: Number(threshold || 0), tone: 'slate', marker: true },
+  ]
+  return (
+    <div className="waterfall-stack">
+      {rows.map((row) => (
+        <div key={row.label} className="waterfall-row">
+          <div className="waterfall-meta">
+            <strong>{row.label}</strong>
+            <span>{row.signed && row.value > 0 ? '+' : ''}{row.value.toFixed(2)}</span>
+          </div>
+          <div className="waterfall-track">
+            <div className={`waterfall-fill tone-${row.tone} ${row.marker ? 'marker' : ''}`} style={{ width: `${Math.max(Math.abs(row.value) / maxAbs, 0.04) * 100}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function StateProgressFlow({ protectiveSellCandidate, exitCandidate }) {
+  const current = protectiveSellCandidate || exitCandidate
+  if (!current) return <div className="subline">该轮没有进入明显的卖出 / 保护推进链路。</div>
+  const state = current.state || current.sell_state?.state || 'observe_exit'
+  const steps = [
+    { key: 'rule', label: '规则触发', active: true, desc: '规则层先识别到减仓 / 保护理由' },
+    { key: 'alert', label: '预警共振', active: Boolean(protectiveSellCandidate?.alert), desc: protectiveSellCandidate?.alert?.headline || '无额外预警加成' },
+    { key: 'observe', label: '观察期', active: ['observe_exit', 'ready_to_trim', 'ready_to_exit'].includes(state), desc: `${current.streak || current.sell_state?.trigger_streak || 0}/${current.required_runs || current.sell_state?.required_runs || 0}` },
+    { key: 'ready', label: '执行就绪', active: ['ready_to_trim', 'ready_to_exit'].includes(state), desc: mapLabel('sellState', state, state) },
+  ]
+  return (
+    <div className="decision-flow-rail">
+      {steps.map((step, idx) => (
+        <div key={step.key} className={`decision-flow-node ${step.active ? 'active' : ''}`} style={{ animationDelay: `${idx * 70}ms` }}>
+          <div className="decision-flow-dot">{idx + 1}</div>
+          <strong>{step.label}</strong>
+          <span>{step.desc}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function buildSixStageItems({
+  filteredNews = [],
+  rawNews = [],
+  quotes = {},
+  holdings = [],
+  ruleProposal,
+  baseBundle,
+  alertLayer,
+  dynamicFocus,
+  strategySignal,
+  llmReview,
+  finalDecision,
+  execution,
+  summaryLines = [],
+}) {
+  const technicalHighlights = baseBundle?.technical_overlay?.highlights || []
+  const sentimentHighlights = baseBundle?.market_sentiment_overlay?.highlights || []
+  return [
+    {
+      key: 'input',
+      label: '数据输入',
+      tone: 'blue',
+      metric: `新闻 ${filteredNews.length}/${rawNews.length} · 行情 ${Object.keys(quotes).length} · 持仓 ${holdings.length}`,
+      desc: '先读取真实新闻、账户持仓、最近成交和行情快照，为后面的规则层提供输入。',
+      conclusion: `输入完整度：新闻 ${filteredNews.length}/${rawNews.length}，行情 ${Object.keys(quotes).length}，持仓 ${holdings.length}`,
+      impact: '这一层决定后面的判断是不是建立在足够完整、足够新的上下文之上。',
+      bullets: [
+        filteredNews[0]?.title ? `高权重新闻：${filteredNews[0].title}` : null,
+        holdings.length ? `账户持仓 ${holdings.length} 只` : null,
+        summaryLines[0] || null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'rule',
+      label: '规则决策',
+      tone: 'purple',
+      metric: mapLabel('action', ruleProposal?.action, ruleProposal?.action || '未知'),
+      desc: ruleProposal?.reason || '规则层未给出明确结论。',
+      conclusion: ruleProposal?.reason || '规则层未给出明确结论。',
+      impact: '这是程序化层先产出的原始动作提案，后面的校准和复核都以它为起点。',
+      bullets: [
+        baseBundle?.buy_skip_reasons?.[0] || null,
+        baseBundle?.block_reason ? `阻断原因：${baseBundle.block_reason}` : null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'overlay',
+      label: '叠加校准',
+      tone: 'amber',
+      metric: `技术面 ${technicalHighlights.length} · 资金情绪 ${sentimentHighlights.length} · 预警 ${alertLayer?.summary?.total || 0}`,
+      desc: '把技术面、资金情绪和预警层叠加到规则提案上，决定是否要增强、削弱或拦截。',
+      conclusion: `技术面 ${technicalHighlights.length} 条 / 资金情绪 ${sentimentHighlights.length} 条 / 预警 ${alertLayer?.summary?.total || 0} 条`,
+      impact: '这一步负责把规则提案和盘中现实重新对齐，避免机械执行。',
+      bullets: [
+        technicalHighlights[0] || null,
+        sentimentHighlights[0] || null,
+        alertLayer?.summary?.highlights?.[0] || null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'strategy',
+      label: '策略判断',
+      tone: 'green',
+      metric: `${mapLabel('strategyState', strategySignal?.state, strategySignal?.state || '未知')} · ${mapLabel('regime', dynamicFocus?.market_regime, dynamicFocus?.market_regime || '未知')}`,
+      desc: dynamicFocus?.news_summary || strategySignal?.switch_reason || '结合风格、市场结构和策略状态机，判断是否要继续维持或切换。',
+      conclusion: `${mapLabel('strategyState', strategySignal?.state, strategySignal?.state || '未知')} / ${mapLabel('regime', dynamicFocus?.market_regime, dynamicFocus?.market_regime || '未知')}`,
+      impact: '这一步把单轮信号提升到“大策略是否维持/切换”的层面，决定风格框架。',
+      bullets: [
+        strategySignal?.last_suggested_profile ? `建议策略：${mapLabel('profile', strategySignal.last_suggested_profile, strategySignal.last_suggested_profile)}` : null,
+        dynamicFocus?.focus_sectors?.length ? `重点板块：${dynamicFocus.focus_sectors.slice(0, 4).join(' / ')}` : null,
+        dynamicFocus?.avoid_sectors?.length ? `回避方向：${dynamicFocus.avoid_sectors.slice(0, 3).join(' / ')}` : null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'review',
+      label: '最终复核',
+      tone: llmReview?.enabled ? 'blue' : 'slate',
+      metric: llmReview?.enabled ? mapLabel('action', llmReview?.action, llmReview?.action || '未知') : '未启用',
+      desc: llmReview?.enabled ? (llmReview?.reason || '暂无复核结论') : '本轮未启用 LLM 复核。',
+      conclusion: llmReview?.reason || '本轮未启用 LLM 复核。',
+      impact: '这一层不是替代规则，而是做最后一层语义校验与风险拦截。',
+      bullets: [
+        llmReview?.raw?.news_view || null,
+        llmReview?.raw?.risk_note || null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'output',
+      label: '执行输出',
+      tone: finalDecision?.action === 'sell' ? 'red' : finalDecision?.action === 'buy' ? 'green' : 'blue',
+      metric: `${mapLabel('action', finalDecision?.action, finalDecision?.action || '未知')} / ${execution || '未执行'}`,
+      desc: finalDecision?.decision_reason || finalDecision?.reason || '暂无执行说明。',
+      conclusion: `${mapLabel('action', finalDecision?.action, finalDecision?.action || '未知')} / ${execution || '未执行'}`,
+      impact: '这里把最终动作、对外摘要和执行状态收口成一份可审计结果。',
+      bullets: [
+        summaryLines[0] || null,
+        summaryLines[1] || null,
+      ].filter(Boolean),
+    },
+  ]
+}
+
+function SixStageDecisionFlow({ stages = [] }) {
+  const [activeStageKey, setActiveStageKey] = useState(stages[0]?.key || 'input')
+  if (!stages.length) return <div className="subline">暂无可展示的阶段数据。</div>
+  const activeStage = stages.find((item) => item.key === activeStageKey) || stages[0]
+  return (
+    <div className="stage-stepper-shell">
+      <div className="stage-flow-head">
+        <strong>六阶段决策流</strong>
+        <span>按当前真实算法链路展开；点左侧阶段，右侧只看该阶段详情。</span>
+      </div>
+      <div className="stage-stepper-layout">
+        <div className="stage-stepper-rail" role="tablist" aria-label="六阶段决策流">
+          {stages.map((stage, idx) => (
+            <button
+              key={stage.key}
+              type="button"
+              role="tab"
+              aria-selected={activeStage.key === stage.key}
+              className={`stage-step-button tone-${stage.tone} ${activeStage.key === stage.key ? 'active' : ''}`}
+              onClick={() => setActiveStageKey(stage.key)}
+            >
+              <span className="stage-step-button-index">{idx + 1}</span>
+              <span className="stage-step-button-copy">
+                <strong>{stage.label}</strong>
+                <small>{stage.metric}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+        <article className={`stage-step-detail tone-${activeStage.tone}`}>
+          <div className="stage-step-detail-top">
+            <div className="stage-flow-index">{stages.findIndex((item) => item.key === activeStage.key) + 1}</div>
+            <div>
+              <div className="stage-step-detail-label">当前阶段</div>
+              <strong>{activeStage.label}</strong>
+              <div className="stage-step-detail-metric">{activeStage.metric}</div>
+            </div>
+          </div>
+          <p>{activeStage.desc}</p>
+          <div className="stage-detail-panels">
+            <div className="stage-detail-panel">
+              <span>小结论</span>
+              <strong>{activeStage.conclusion || activeStage.metric}</strong>
+            </div>
+            <div className="stage-detail-panel">
+              <span>为什么重要</span>
+              <strong>{activeStage.impact || '这一阶段会影响后续最终动作。'}</strong>
+            </div>
+          </div>
+          <div className="stage-evidence-shell">
+            <div className="stage-evidence-title">关键证据</div>
+            {activeStage.bullets?.length ? (
+              <div className="chips vertical">
+                {activeStage.bullets.map((item, idx) => <span key={`${activeStage.key}-${idx}`} className="chip chip-primary">{item}</span>)}
+              </div>
+            ) : (
+              <div className="subline">这个阶段当前没有更多可展开的补充细节。</div>
+            )}
+          </div>
+        </article>
+      </div>
+    </div>
+  )
+}
+
+function FishboneDiagram({ ruleProposal, finalDecision, llmReview, alertLayer, protectionWatchlist, protectiveSellCandidate, baseBundle, dynamicFocus, strategySignal }) {
+  const leftGroups = [
+    {
+      title: '规则层',
+      items: [ruleProposal?.reason, baseBundle?.buy_skip_reasons?.[0], baseBundle?.block_reason].filter(Boolean),
+    },
+    {
+      title: '预警层',
+      items: [protectiveSellCandidate?.alert?.headline, ...(alertLayer?.summary?.highlights || []).slice(0, 2)].filter(Boolean),
+    },
+    {
+      title: '风险约束',
+      items: [
+        baseBundle?.pending_context?.pending_count ? `待成交 ${baseBundle.pending_context.pending_count} 笔` : null,
+        baseBundle?.risk_controls?.max_bucket_exposure !== undefined ? `bucket 上限 ${fmtPct(baseBundle.risk_controls.max_bucket_exposure)}` : null,
+        baseBundle?.risk_controls?.max_single_position_exposure !== undefined ? `单仓上限 ${fmtPct(baseBundle.risk_controls.max_single_position_exposure)}` : null,
+      ].filter(Boolean),
+    },
+  ]
+  const rightGroups = [
+    {
+      title: '卖出状态机',
+      items: [protectiveSellCandidate?.decision_reason, protectionWatchlist?.[0]?.headline].filter(Boolean),
+    },
+    {
+      title: '模型复核',
+      items: [llmReview?.reason, llmReview?.raw?.risk_note].filter(Boolean),
+    },
+    {
+      title: '市场结构',
+      items: [dynamicFocus?.news_summary, dynamicFocus?.market_regime ? `市场结构：${dynamicFocus.market_regime}` : null, strategySignal?.switch_reason].filter(Boolean),
+    },
+  ]
+  return (
+    <div className="fishbone-shell">
+      <div className="fishbone-col">
+        {leftGroups.map((group, idx) => (
+          <div key={group.title} className={`fishbone-branch left branch-${idx + 1}`}>
+            <strong>{group.title}</strong>
+            {(group.items.length ? group.items : ['暂无强解释因子']).map((item, itemIdx) => <span key={`${group.title}-${itemIdx}`}>{item}</span>)}
+          </div>
+        ))}
+      </div>
+      <div className="fishbone-spine">
+        <div className="fishbone-core pulse">
+          <div className="fishbone-core-label">最终动作</div>
+          <strong>{mapLabel('action', finalDecision?.action, finalDecision?.action || '未知')}</strong>
+          <span>{finalDecision?.decision_reason || finalDecision?.reason || '暂无'}</span>
+        </div>
+      </div>
+      <div className="fishbone-col">
+        {rightGroups.map((group, idx) => (
+          <div key={group.title} className={`fishbone-branch right branch-${idx + 1}`}>
+            <strong>{group.title}</strong>
+            {(group.items.length ? group.items : ['暂无强解释因子']).map((item, itemIdx) => <span key={`${group.title}-${itemIdx}`}>{item}</span>)}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ExplanationNodeRail({ nodes = [] }) {
+  if (!nodes.length) return <div className="subline">当前没有可展开的解释节点。</div>
+  return (
+    <div className="reason-rail">
+      {nodes.map((node, idx) => (
+        <article key={node.key || idx} className={`reason-node tone-${node.tone || 'blue'}`} style={{ animationDelay: `${idx * 60}ms` }}>
+          <div className="reason-node-top">
+            <div className="reason-node-index">{idx + 1}</div>
+            <div>
+              <strong>{node.title}</strong>
+              <div className="subline">{node.metric || '—'}</div>
+            </div>
+          </div>
+          <p>{node.desc}</p>
+          {node.bullets?.length ? (
+            <div className="chips vertical top-space">
+              {node.bullets.slice(0, 5).map((item, bulletIdx) => <span key={`${node.key || idx}-${bulletIdx}`} className="chip chip-primary">{item}</span>)}
+            </div>
+          ) : null}
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function SymbolSpotlight({ symbol, holding, quote, exitCandidate, scoredCandidate, protectiveSellCandidate }) {
+  if (!symbol) return <div className="subline">点击某条交易记录后，这里会聚焦对应标的的更细节信息。</div>
+  return (
+    <div className="focus-stack">
+      <article className="focus-card spotlight-card">
+        <div className="focus-head">
+          <strong>{holding?.name || quote?.name || exitCandidate?.name || scoredCandidate?.name || symbol}</strong>
+          <Badge tone="blue">{symbol}</Badge>
+        </div>
+        <div className="kv-list compact top-space">
+          {holding ? <div><span>持仓股数</span><strong>{holding.shares || 0} 股</strong></div> : null}
+          {holding ? <div><span>持仓浮盈</span><strong>{fmtPct(holding.profit_rate)}</strong></div> : null}
+          {holding ? <div><span>成本 / 现价</span><strong>{fmtMoney(holding.avg_cost)} / {fmtMoney(holding.current_price)}</strong></div> : null}
+          {quote ? <div><span>当日涨跌</span><strong>{fmtPct(quote.change_rate)}</strong></div> : null}
+          {exitCandidate ? <div><span>卖出优先级</span><strong>{exitCandidate.priority || '—'}</strong></div> : null}
+          {exitCandidate ? <div><span>状态机</span><strong>{mapLabel('sellState', exitCandidate.sell_state?.state, exitCandidate.sell_state?.state || 'observe_exit')}</strong></div> : null}
+          {scoredCandidate ? <div><span>候选总分</span><strong>{scoredCandidate.score}</strong></div> : null}
+          {protectiveSellCandidate ? <div><span>保护候选</span><strong>{protectiveSellCandidate.name}</strong></div> : null}
+        </div>
+        {exitCandidate?.trigger_reasons?.length ? (
+          <div className="chips vertical top-space">
+            {exitCandidate.trigger_reasons.slice(0, 6).map((item, idx) => <span key={`${symbol}-trigger-${idx}`} className="chip chip-danger">{formatReasonItem(item)}</span>)}
+          </div>
+        ) : null}
+      </article>
+    </div>
+  )
+}
+
+function AuditExplainModal({
+  open,
+  onClose,
+  selectedAuditName,
+  selectedAudit,
+  auditLoading,
+  auditError,
+  ruleProposal,
+  finalDecision,
+  llmReview,
+  scoredCandidates,
+  exitCandidates,
+  alertLayer,
+  protectiveSellCandidate,
+  protectionWatchlist,
+  strategySignal,
+  dynamicFocus,
+  baseBundle,
+  execution,
+  focusSymbol,
+}) {
+  useEffect(() => {
+    if (!open) return undefined
+    const previousOverflow = document.body.style.overflow
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open, onClose])
+
+  const inputs = selectedAudit?.inputs || {}
+  const filteredNews = inputs?.filtered_market_news || []
+  const rawNews = inputs?.raw_market_news || []
+  const quotes = inputs?.quotes || {}
+  const holdings = inputs?.portfolio_data?.data?.holdings || []
+  const focusHolding = focusSymbol ? holdings.find((item) => item.symbol === focusSymbol) : null
+  const focusQuote = focusSymbol ? quotes?.[focusSymbol] : null
+  const focusExitCandidate = focusSymbol ? exitCandidates.find((item) => item.symbol === focusSymbol) : null
+  const focusScoredCandidate = focusSymbol ? scoredCandidates.find((item) => item.symbol === focusSymbol) : null
+  const topExit = protectiveSellCandidate || exitCandidates[0]
+  const summaryLines = Array.isArray(selectedAudit?.outputs?.summary) ? selectedAudit.outputs.summary : []
+  const detailNodes = [
+    {
+      key: 'inputs',
+      title: '市场输入',
+      tone: 'blue',
+      metric: `新闻 ${filteredNews.length}/${rawNews.length} · 行情 ${Object.keys(quotes).length}`,
+      desc: '这一轮先读取真实新闻、账户持仓、最近成交与行情快照，再进入规则层。',
+      bullets: [
+        filteredNews[0]?.title ? `高权重新闻：${filteredNews[0].title}` : null,
+        holdings.length ? `账户持仓 ${holdings.length} 只` : null,
+        inputs?.trades_data?.data?.length ? `最近成交 ${inputs.trades_data.data.length} 条` : null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'focus',
+      title: '动态关注层',
+      tone: 'green',
+      metric: dynamicFocus?.market_regime ? `市场结构 ${dynamicFocus.market_regime}` : (dynamicFocus?.used ? '已触发' : '未触发'),
+      desc: dynamicFocus?.news_summary || '这一层负责从真实新闻、盘面结构和持仓状态里提炼当前应重点盯的方向。',
+      bullets: [
+        dynamicFocus?.suggested_profile ? `建议大策略：${mapLabel('profile', dynamicFocus.suggested_profile, dynamicFocus.suggested_profile)}` : null,
+        dynamicFocus?.focus_sectors?.length ? `重点板块：${dynamicFocus.focus_sectors.slice(0, 4).join(' / ')}` : null,
+        dynamicFocus?.avoid_sectors?.length ? `回避方向：${dynamicFocus.avoid_sectors.slice(0, 3).join(' / ')}` : null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'state',
+      title: '策略状态机',
+      tone: 'purple',
+      metric: `${mapLabel('strategyState', strategySignal?.state, strategySignal?.state || '未知')} · ${strategySignal?.confidence || dynamicFocus?.confidence || 'low'}`,
+      desc: strategySignal?.switch_reason || '这里看系统是否只是在观察切换信号，还是已经准备切换大策略。',
+      bullets: [
+        strategySignal?.ready_to_recommend_switch ? '切换条件已满足' : '仍处于观察 / 维持阶段',
+        strategySignal?.last_suggested_profile ? `最近建议：${mapLabel('profile', strategySignal.last_suggested_profile, strategySignal.last_suggested_profile)}` : null,
+        strategySignal?.consecutive_same_suggestion !== undefined ? `连续同向信号：${strategySignal.consecutive_same_suggestion}` : null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'risk',
+      title: '硬约束 / 风控',
+      tone: baseBundle?.hard_block ? 'red' : 'amber',
+      metric: baseBundle?.hard_block ? '命中硬阻断' : '未命中硬阻断',
+      desc: baseBundle?.block_reason || '这一层优先判断是否触及不可绕过的交易边界，再决定后面是否继续推进。',
+      bullets: [
+        baseBundle?.pending_count ? `待成交 ${baseBundle.pending_count} 笔` : null,
+        baseBundle?.risk_controls?.max_bucket_exposure !== undefined ? `bucket 上限 ${fmtPct(baseBundle.risk_controls.max_bucket_exposure)}` : null,
+        baseBundle?.risk_controls?.max_single_position_exposure !== undefined ? `单仓上限 ${fmtPct(baseBundle.risk_controls.max_single_position_exposure)}` : null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'proposal',
+      title: '规则提案',
+      tone: 'blue',
+      metric: mapLabel('action', ruleProposal?.action, ruleProposal?.action || '未知'),
+      desc: ruleProposal?.reason || '规则层先产出程序化提案，再交给后续层继续过滤。',
+      bullets: [
+        scoredCandidates[0]?.name ? `最强候选：${scoredCandidates[0].name} / ${scoredCandidates[0].score}` : null,
+        topExit?.name ? `主要卖出候选：${topExit.name}` : null,
+        baseBundle?.buy_skip_reasons?.[0] || null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'alert',
+      title: '预警 / 保护层',
+      tone: alertLayer?.summary?.critical ? 'red' : 'amber',
+      metric: `预警 ${alertLayer?.summary?.total || 0} · 保护观察 ${protectionWatchlist.length}`,
+      desc: protectiveSellCandidate?.decision_reason || '这层负责把风险共振、利润保护与持仓异动变成更温和的保护动作。',
+      bullets: [
+        protectiveSellCandidate?.alert?.headline || null,
+        protectionWatchlist[0]?.headline || null,
+        alertLayer?.alerts?.[0]?.headline || null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'llm',
+      title: 'LLM 复核',
+      tone: llmReview?.action === 'sell' ? 'red' : llmReview?.action === 'buy' ? 'green' : 'blue',
+      metric: mapLabel('action', llmReview?.action, llmReview?.action || '未知'),
+      desc: llmReview?.reason || '模型会在最后补一层信息面和风险面复核。',
+      bullets: [
+        llmReview?.raw?.news_view || null,
+        llmReview?.raw?.risk_note || null,
+        llmReview?.error || null,
+      ].filter(Boolean),
+    },
+    {
+      key: 'result',
+      title: '最终执行 / 输出',
+      tone: 'green',
+      metric: execution,
+      desc: finalDecision?.decision_reason || finalDecision?.reason || '暂无执行说明。',
+      bullets: [
+        selectedAudit?.outputs?.generated_post_title ? `分析帖：${selectedAudit.outputs.generated_post_title}` : null,
+        summaryLines[0] || null,
+        summaryLines[1] || null,
+      ].filter(Boolean),
+    },
+  ]
+  const stageItems = buildSixStageItems({
+    filteredNews,
+    rawNews,
+    quotes,
+    holdings,
+    ruleProposal,
+    baseBundle,
+    alertLayer,
+    dynamicFocus,
+    strategySignal,
+    llmReview,
+    finalDecision,
+    execution,
+    summaryLines,
+  })
+
+  if (!open) return null
+
+  return (
+    <div className="modal-shell" role="dialog" aria-modal="true" aria-label="交易解释舱">
+      <button type="button" className="modal-backdrop" aria-label="关闭弹窗" onClick={onClose} />
+      <div className="modal-panel">
+        <div className="modal-header">
+          <div>
+            <div className="hero-eyebrow">交易解释舱 / Decision Studio</div>
+            <h2>{selectedAuditName || '未选择审计记录'}</h2>
+            <p>先用 6 阶段总链路看全貌，再往下展开 8 个更细的解释节点。</p>
+          </div>
+          <div className="modal-header-actions">
+            {selectedAuditName ? <Badge tone="blue">{selectedAuditName}</Badge> : null}
+            <button type="button" className="ghost-inline-button" onClick={onClose}>关闭</button>
+          </div>
+        </div>
+
+        {auditLoading ? <div className="screen-state">正在加载该轮审计详情…</div> : null}
+        {!auditLoading && auditError ? <div className="screen-state error-state">审计详情加载失败：{auditError}</div> : null}
+        {!auditLoading && !auditError && selectedAudit ? (
+          <div className="modal-body">
+            <div className="modal-hero-metrics">
+              <div className="mini-card"><span>模式</span><strong>{mapLabel('mode', selectedAudit?.mode, selectedAudit?.mode || '未知')}</strong></div>
+              <div className="mini-card"><span>最终动作</span><strong>{mapLabel('action', finalDecision?.action, finalDecision?.action || '未知')}</strong></div>
+              <div className="mini-card"><span>策略状态</span><strong>{mapLabel('strategyState', strategySignal?.state, strategySignal?.state || '未知')}</strong></div>
+              <div className="mini-card"><span>市场结构</span><strong>{mapLabel('regime', dynamicFocus?.market_regime, dynamicFocus?.market_regime || '未知')}</strong></div>
+              <div className="mini-card"><span>聚焦标的</span><strong>{focusSymbol || topExit?.symbol || scoredCandidates[0]?.symbol || '未指定'}</strong></div>
+            </div>
+
+            <div className="modal-grid">
+              <div className="modal-side-column">
+                <Card className="modal-section-card sticky-card">
+                  <SectionHeader title="详细决策节点" subtitle="上面先看 6 阶段主链路，这里再把单轮决策拆成 8 个解释节点" />
+                  <ExplanationNodeRail nodes={detailNodes} />
+                </Card>
+
+                <Card className="modal-section-card">
+                  <SectionHeader title="聚焦标的" subtitle="如果你是从交易记录点进来，这里优先展示对应标的的细节" />
+                  <SymbolSpotlight
+                    symbol={focusSymbol || topExit?.symbol || scoredCandidates[0]?.symbol}
+                    holding={focusHolding || holdings.find((item) => item.symbol === topExit?.symbol || item.symbol === scoredCandidates[0]?.symbol)}
+                    quote={focusQuote || quotes?.[topExit?.symbol] || quotes?.[scoredCandidates[0]?.symbol]}
+                    exitCandidate={focusExitCandidate || topExit}
+                    scoredCandidate={focusScoredCandidate || scoredCandidates[0]}
+                    protectiveSellCandidate={protectiveSellCandidate}
+                  />
+                </Card>
+
+                <Card className="modal-section-card">
+                  <SectionHeader title="摘要证据" subtitle="从审计输出里抽取最能快速读懂的几条原始摘要" />
+                  <div className="chips vertical">
+                    {summaryLines.slice(0, 10).map((line, idx) => <span key={`summary-${idx}`} className="chip chip-primary">{line}</span>)}
+                    {!summaryLines.length ? <span className="chip">该轮没有摘要行</span> : null}
+                  </div>
+                </Card>
+              </div>
+
+              <div className="modal-main-column">
+                <div className="stack-page">
+                  <SixStageDecisionFlow key={selectedAuditName || 'audit-stepper'} stages={stageItems} />
+
+                  <Card className="modal-section-card">
+                    <SectionHeader title="鱼骨图：这轮动作是怎么长出来的" subtitle="从规则、预警、风险约束、状态机、模型复核和市场结构几根主骨，去看最终动作的成因" />
+                    <FishboneDiagram
+                      ruleProposal={ruleProposal}
+                      finalDecision={finalDecision}
+                      llmReview={llmReview}
+                      alertLayer={alertLayer}
+                      protectionWatchlist={protectionWatchlist}
+                      protectiveSellCandidate={protectiveSellCandidate}
+                      baseBundle={baseBundle}
+                      dynamicFocus={dynamicFocus}
+                      strategySignal={strategySignal}
+                    />
+                  </Card>
+
+                  <div className="page-grid two-col">
+                    <Card className="modal-section-card">
+                      <SectionHeader title="决策瀑布图" subtitle="把原始规则分、预警层调整、最终候选分和阈值放到一张图里看" />
+                      <ScoreWaterfall candidate={focusScoredCandidate || scoredCandidates[0]} threshold={baseBundle?.scoring?.min_score_to_buy || baseBundle?.profile_scoring?.min_score_to_buy || 2} />
+                    </Card>
+                    <Card className="modal-section-card">
+                      <SectionHeader title="状态推进流程图" subtitle="把保护观察、连续触发、执行就绪拆成更清晰的节点" />
+                      <StateProgressFlow protectiveSellCandidate={protectiveSellCandidate} exitCandidate={focusExitCandidate || exitCandidates[0]} />
+                    </Card>
+                  </div>
+
+                  <div className="page-grid two-col">
+                    <Card className="modal-section-card">
+                      <SectionHeader title="候选 / 卖出对象" subtitle="这一轮最关键的候选和卖出对象都摆在一起看" />
+                      <div className="focus-stack">
+                        {scoredCandidates.slice(0, 3).map((item) => (
+                          <article key={`candidate-${item.symbol}`} className={`focus-card ${focusSymbol === item.symbol ? 'spotlight-card active' : ''}`}>
+                            <div className="focus-head"><strong>{item.name}</strong><span>{item.symbol} / 总分 {item.score}</span></div>
+                            <p>{mapLabel('bucket', item.bucket, item.bucket)} · {mapLabel('layer', item.layer, item.layer)}</p>
+                            {item.raw_score !== undefined ? <div className="subline">原始分 {item.raw_score} / 预警调整 {item.alert_adjustment > 0 ? '+' : ''}{item.alert_adjustment || 0}</div> : null}
+                            <div className="chips vertical top-space">
+                              {(item.score_breakdown || []).slice(0, 5).map((part, idx) => <span key={`${item.symbol}-${idx}`} className={`chip ${part.delta >= 0 ? 'chip-primary' : 'chip-danger'}`}>{part.label}: {part.delta > 0 ? '+' : ''}{part.delta}</span>)}
+                            </div>
+                          </article>
+                        ))}
+                        {exitCandidates.slice(0, 3).map((item) => (
+                          <article key={`exit-${item.symbol}`} className={`focus-card ${focusSymbol === item.symbol ? 'spotlight-card active' : ''}`}>
+                            <div className="focus-head"><strong>{item.name}</strong><Badge tone={item.sell_state?.state?.includes('ready') ? 'red' : 'amber'}>{mapLabel('sellState', item.sell_state?.state, item.sell_state?.state || 'observe_exit')}</Badge></div>
+                            <p>{item.decision_reason}</p>
+                            <div className="subline">浮盈 {fmtPct(item.current_profit_rate)} / 当日 {fmtPct(item.day_change)} / priority {item.priority || '—'}</div>
+                            <div className="chips vertical top-space">
+                              {(item.trigger_reasons || []).slice(0, 5).map((reason, idx) => <span key={`${item.symbol}-reason-${idx}`} className="chip chip-danger">{formatReasonItem(reason)}</span>)}
+                            </div>
+                          </article>
+                        ))}
+                        {!scoredCandidates.length && !exitCandidates.length ? <div className="subline">该轮没有候选或卖出对象明细</div> : null}
+                      </div>
+                    </Card>
+
+                    <Card className="modal-section-card">
+                      <SectionHeader title="预警 / 模型复核" subtitle="把预警快照和模型结论放在一屏里对照" />
+                      <div className="stack-page compact-gap">
+                        <AlertFeed alerts={(alertLayer?.alerts || []).slice(0, 6)} emptyText="该轮没有高优先级预警" />
+                        <div className="kv-list compact">
+                          <div><span>是否启用</span><strong>{llmReview?.enabled ? '是' : '否'}</strong></div>
+                          <div><span>模型动作</span><strong>{mapLabel('action', llmReview?.action, llmReview?.action || '未知')}</strong></div>
+                          <div><span>复核结论</span><strong>{llmReview?.reason || '暂无'}</strong></div>
+                          <div><span>信息面总结</span><strong>{llmReview?.raw?.news_view || '暂无'}</strong></div>
+                          <div><span>风险提示</span><strong>{llmReview?.raw?.risk_note || '暂无'}</strong></div>
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -586,7 +1344,7 @@ function useDashboardData(pathname) {
   const [pageCache, setPageCache] = useState({})
   const [shellData, setShellData] = useState(null)
   const [configData, setConfigData] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [_loading, setLoading] = useState(true)
   const [pageLoading, setPageLoading] = useState(false)
   const [configLoading, setConfigLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -704,7 +1462,6 @@ function useDashboardData(pathname) {
     pageData: activePageData,
     shellData,
     configData,
-    loading,
     pageLoading,
     configLoading,
     saving,
@@ -1227,16 +1984,40 @@ function ValidationPage({ vm }) {
 }
 
 function HistoryPage({ vm }) {
-  const [selectedAuditName, setSelectedAuditName] = useState(vm.history.audits?.[0]?.fileName || '')
+  const audits = useMemo(() => vm.history.audits || [], [vm.history.audits])
+  const trades = useMemo(() => vm.trades || [], [vm.trades])
+  const latestAlerts = useMemo(() => vm.alertLayer?.alerts || [], [vm.alertLayer?.alerts])
+  const AUDIT_PAGE_SIZE = 6
+  const TRADE_PAGE_SIZE = 5
+
+  const [selectedAuditName, setSelectedAuditName] = useState(audits?.[0]?.fileName || '')
   const [selectedAudit, setSelectedAudit] = useState(null)
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditError, setAuditError] = useState('')
+  const [explainOpen, setExplainOpen] = useState(false)
+  const [focusSymbol, setFocusSymbol] = useState('')
+  const [auditPage, setAuditPage] = useState(1)
+  const [tradePage, setTradePage] = useState(1)
+
+  const auditTotalPages = Math.max(1, Math.ceil(audits.length / AUDIT_PAGE_SIZE))
+  const tradeTotalPages = Math.max(1, Math.ceil(trades.length / TRADE_PAGE_SIZE))
+
+  const pagedAudits = useMemo(() => audits.slice((auditPage - 1) * AUDIT_PAGE_SIZE, auditPage * AUDIT_PAGE_SIZE), [audits, auditPage])
+  const pagedTrades = useMemo(() => trades.slice((tradePage - 1) * TRADE_PAGE_SIZE, tradePage * TRADE_PAGE_SIZE), [trades, tradePage])
 
   useEffect(() => {
-    if (!selectedAuditName && vm.history.audits?.[0]?.fileName) {
-      setSelectedAuditName(vm.history.audits[0].fileName)
+    if (auditPage > auditTotalPages) setAuditPage(auditTotalPages)
+  }, [auditPage, auditTotalPages])
+
+  useEffect(() => {
+    if (tradePage > tradeTotalPages) setTradePage(tradeTotalPages)
+  }, [tradePage, tradeTotalPages])
+
+  useEffect(() => {
+    if (!selectedAuditName && audits?.[0]?.fileName) {
+      setSelectedAuditName(audits[0].fileName)
     }
-  }, [selectedAuditName, vm.history.audits])
+  }, [selectedAuditName, audits])
 
   useEffect(() => {
     if (!selectedAuditName) return
@@ -1276,183 +2057,105 @@ function HistoryPage({ vm }) {
     ? `${outputs.trade_result.data.status}`
     : (outputs?.trade_error || (finalDecision?.action === 'hold' ? '未交易' : '无真实执行结果'))
 
+  const openAuditExplain = useCallback((auditName, symbol = '') => {
+    if (auditName) setSelectedAuditName(auditName)
+    setFocusSymbol(symbol || '')
+    setExplainOpen(true)
+  }, [])
+
   return (
-    <div className="stack-page">
-      <div className="page-grid three-col">
-        <Card>
-          <SectionHeader title="最近审计记录" subtitle="点开某一轮，右侧看交易解释面板" />
-          <div className="audit-list">
-            {vm.history.audits.slice(0, 8).map((item) => (
-              <button key={item.fileName} type="button" className={`audit-row audit-row-button ${selectedAuditName === item.fileName ? 'active' : ''}`} onClick={() => setSelectedAuditName(item.fileName)}>
-                <div>
-                  <strong>{item.fileName}</strong>
-                  <div className="subline">{fmtTime(item.updatedAt)} · {mapLabel('mode', item.mode, item.mode)}</div>
-                </div>
-                <div className="audit-mini">
-                  <Badge tone={toneForAction(item.action)}>{mapLabel('action', item.action, item.action)}</Badge>
-                  <span>{mapLabel('strategyState', item.strategyState, item.strategyState)}</span>
-                </div>
-              </button>
-            ))}
+    <div className="stack-page history-page">
+      <div className="history-hero-grid">
+        <Card className="history-audits-card">
+          <SectionHeader
+            title="最近审计记录"
+            subtitle="主列表放大展示；优先从这里进入交易解释舱。"
+            extra={<Badge tone="slate">{audits.length} 条</Badge>}
+          />
+          <div className="history-list">
+            <AuditTimelineTable items={pagedAudits} selectedAuditName={selectedAuditName} onOpenAudit={openAuditExplain} />
           </div>
+          <PaginationControls page={auditPage} totalPages={auditTotalPages} onPageChange={setAuditPage} label={`审计记录 ${audits.length} 条`} />
         </Card>
 
-        <Card>
-          <SectionHeader title="最近交易" subtitle="优先展示当前可用交易结果" />
-          <div className="audit-list">
-            {(vm.trades || []).slice(0, 10).map((item, idx) => (
-              <div key={`${item.symbol || idx}-${idx}`} className="trade-row">
-                <div>
-                  <strong>{item.name || item.symbol || '未知标的'}</strong>
-                  <div className="subline">{item.symbol || '—'} · {mapLabel('status', item.status, item.status || '未知')}</div>
-                </div>
-                <div className="trade-side">
-                  <Badge tone={toneForAction(item.action)}>{mapLabel('action', item.action, item.action)}</Badge>
-                  <span>{item.shares || 0} 股</span>
-                </div>
+        <div className="history-side-rail">
+          <Card>
+            <SectionHeader
+              title="最近交易"
+              subtitle="交易列表单独成栏，不再挤压主审计列表。"
+              extra={<Badge tone="slate">{trades.length} 条</Badge>}
+            />
+            <div className="history-side-list">
+              <TradeTimelineTable
+                items={pagedTrades}
+                onOpenTrade={(item) => {
+                  const idx = pagedTrades.findIndex((row) => row === item)
+                  const linkedAudit = audits?.[(tradePage - 1) * TRADE_PAGE_SIZE + idx]?.fileName || audits?.[0]?.fileName || selectedAuditName
+                  openAuditExplain(linkedAudit, item.symbol || '')
+                }}
+              />
+            </div>
+            <PaginationControls page={tradePage} totalPages={tradeTotalPages} onPageChange={setTradePage} label={`交易记录 ${trades.length} 条`} />
+          </Card>
+
+          <Card className="history-entry-card">
+            <SectionHeader title="解释舱入口" subtitle="先看摘要，再进入完整解释。" />
+            <div className="stack-page compact-gap">
+              <div className="mini-card emphasis history-entry-focus">
+                <span>当前选中审计</span>
+                <strong>{selectedAuditName || '未选择'}</strong>
+                <small>{selectedAudit?.mode ? `${mapLabel('mode', selectedAudit.mode, selectedAudit.mode)} · ${fmtTime(selectedAudit?.inputs?.now || vm.summary?.asOf)}` : '点左侧任意审计即可打开'}</small>
               </div>
-            ))}
-          </div>
-        </Card>
+              <div className="chips vertical">
+                <span className="chip chip-primary">上半部分：6 阶段总链路</span>
+                <span className="chip chip-primary">下半部分：8 个详细节点 + 鱼骨图 + 状态推进图</span>
+                <span className="chip chip-primary">支持从审计记录和交易记录两边进入</span>
+              </div>
+              <button type="button" className="primary-button" onClick={() => openAuditExplain(selectedAuditName || audits?.[0]?.fileName || '', focusSymbol)}>
+                打开交易解释舱
+              </button>
+            </div>
+          </Card>
+        </div>
+      </div>
 
+      <div className="history-support-grid">
         <Card>
-          <SectionHeader title="最近新闻" subtitle="当前策略引用的新闻样本" />
-          <div className="news-stack">
-            {vm.news.slice(0, 8).map((item, idx) => (
-              <a className="news-card" key={`${item.link}-${idx}`} href={item.link} target="_blank" rel="noreferrer">
-                <span>{item.source}</span>
-                <strong>{item.title}</strong>
-              </a>
-            ))}
-          </div>
+          <SectionHeader title="最近预警" subtitle="保留最新一轮预警快照，便于复盘。" extra={<Badge tone="slate">{latestAlerts.length} 条</Badge>} />
+          <AlertFeed alerts={latestAlerts.slice(0, 6)} emptyText="当前没有预警快照" />
+        </Card>
+        <Card>
+          <SectionHeader title="最新日志尾部" subtitle="适合快速排查问题；单独放一栏，避免和正文互相挤压。" />
+          <pre className="console-block history-console">{vm.latestLogPreview || '暂无日志'}</pre>
         </Card>
       </div>
 
-      <Card>
-        <SectionHeader title="单笔交易可视化解释面板" subtitle="把规则提案、预警层、卖出状态机、LLM 复核和最终执行串起来看" extra={selectedAuditName ? <Badge tone="blue">{selectedAuditName}</Badge> : null} />
-        {auditLoading ? <div className="screen-state">正在加载该轮审计详情…</div> : null}
-        {!auditLoading && auditError ? <div className="screen-state error-state">审计详情加载失败：{auditError}</div> : null}
-        {!auditLoading && !auditError && selectedAudit ? (
-          <div className="stack-page">
-            <div className="explain-flow-grid">
-              <div className="flow-step"><span>1</span><div><strong>规则提案</strong><p>{mapLabel('action', ruleProposal?.action, ruleProposal?.action || '未知')}：{ruleProposal?.reason || '暂无'}</p></div></div>
-              <div className="flow-step"><span>2</span><div><strong>预警 / 状态机</strong><p>{protectiveSellCandidate ? `保护性减仓候选：${protectiveSellCandidate.name}（${protectiveSellCandidate.streak || 0}/${protectiveSellCandidate.required_runs || 0}）` : `${alertLayer?.summary?.total || 0} 条预警 / ${protectionWatchlist.length} 个保护观察`}</p></div></div>
-              <div className="flow-step"><span>3</span><div><strong>LLM 复核</strong><p>{llmReview?.enabled ? `${mapLabel('action', llmReview?.action, llmReview?.action || '未知')}：${llmReview?.reason || '暂无'}` : '关闭或未触发'}</p></div></div>
-              <div className="flow-step"><span>4</span><div><strong>最终执行</strong><p>{mapLabel('action', finalDecision?.action, finalDecision?.action || '未知')} / {execution}</p></div></div>
-            </div>
-
-            <div className="page-grid two-col">
-              <Card>
-                <SectionHeader title="最终动作" subtitle="先看最后做了什么，再往回拆原因" />
-                <div className="decision-banner">
-                  <div>
-                    <div className="banner-label">最终结论</div>
-                    <div className="banner-value smallish">{mapLabel('action', finalDecision?.action, finalDecision?.action || '未知')}</div>
-                  </div>
-                  <Badge tone={toneForAction(finalDecision?.action)}>{execution}</Badge>
-                </div>
-                <p className="banner-reason">{finalDecision?.decision_reason || finalDecision?.reason || '暂无'}</p>
-                <div className="kv-list compact top-space">
-                  <div><span>规则层原始提案</span><strong>{mapLabel('action', ruleProposal?.action, ruleProposal?.action || '未知')}</strong></div>
-                  <div><span>最终动作</span><strong>{mapLabel('action', finalDecision?.action, finalDecision?.action || '未知')}</strong></div>
-                  <div><span>策略状态</span><strong>{mapLabel('strategyState', strategySignal?.state, strategySignal?.state || '未知')}</strong></div>
-                  <div><span>市场结构</span><strong>{mapLabel('regime', dynamicFocus?.market_regime, dynamicFocus?.market_regime || '未知')}</strong></div>
-                </div>
-              </Card>
-
-              <Card>
-                <SectionHeader title="为什么会这样" subtitle="把影响动作的关键驱动压缩成几个最重要的解释点" />
-                <div className="chips vertical">
-                  {ruleProposal?.reason ? <span className="chip chip-primary">规则提案：{ruleProposal.reason}</span> : null}
-                  {finalDecision?.decision_reason && finalDecision?.decision_reason !== ruleProposal?.reason ? <span className="chip chip-primary">最终决策：{finalDecision.decision_reason}</span> : null}
-                  {protectiveSellCandidate ? <span className="chip chip-danger">保护性减仓：{protectiveSellCandidate.alert?.headline}</span> : null}
-                  {llmReview?.reason ? <span className={`chip ${llmReview?.action === 'hold' && finalDecision?.action === 'hold' && ruleProposal?.action !== 'hold' ? 'chip-danger' : 'chip-primary'}`}>LLM 复核：{llmReview.reason}</span> : null}
-                  {!ruleProposal?.reason && !protectiveSellCandidate && !llmReview?.reason ? <span className="chip">当前没有可展开的额外解释</span> : null}
-                </div>
-              </Card>
-            </div>
-
-            <div className="page-grid two-col">
-              <Card>
-                <SectionHeader title="候选打分 Top 3" subtitle="看这轮系统最想买什么，以及预警层有没有改分" />
-                <div className="focus-stack">
-                  {scoredCandidates.slice(0, 3).map((item) => (
-                    <article key={item.symbol} className="focus-card">
-                      <div className="focus-head"><strong>{item.name}</strong><span>{item.symbol} / 总分 {item.score}</span></div>
-                      <p>{mapLabel('bucket', item.bucket, item.bucket)} · {mapLabel('layer', item.layer, item.layer)}</p>
-                      {item.raw_score !== undefined ? <div className="subline">原始分 {item.raw_score} / 预警调整 {item.alert_adjustment > 0 ? '+' : ''}{item.alert_adjustment || 0}</div> : null}
-                      <div className="chips vertical top-space">
-                        {(item.score_breakdown || []).slice(0, 5).map((part, idx) => (
-                          <span key={`${item.symbol}-${idx}`} className={`chip ${part.delta >= 0 ? 'chip-primary' : 'chip-danger'}`}>{part.label}: {part.delta > 0 ? '+' : ''}{part.delta}</span>
-                        ))}
-                      </div>
-                    </article>
-                  ))}
-                  {!scoredCandidates.length ? <div className="subline">该轮没有候选打分明细</div> : null}
-                </div>
-              </Card>
-
-              <Card>
-                <SectionHeader title="卖出 / 保护链路" subtitle="看这轮是否进入卖出状态机、保护观察或保护性减仓" />
-                <div className="focus-stack">
-                  {protectiveSellCandidate ? (
-                    <article className="focus-card">
-                      <div className="focus-head"><strong>{protectiveSellCandidate.name}</strong><Badge tone={protectiveSellCandidate.state === 'ready_to_trim' ? 'red' : 'amber'}>{mapLabel('sellState', protectiveSellCandidate.state, protectiveSellCandidate.state)}</Badge></div>
-                      <p>{protectiveSellCandidate.decision_reason}</p>
-                    </article>
-                  ) : null}
-                  {exitCandidates.slice(0, 3).map((item) => (
-                    <article key={item.symbol} className="focus-card">
-                      <div className="focus-head"><strong>{item.name}</strong><Badge tone={item.sell_state?.state?.includes('ready') ? 'red' : 'amber'}>{mapLabel('sellState', item.sell_state?.state, item.sell_state?.state || 'observe_exit')}</Badge></div>
-                      <p>{item.decision_reason}</p>
-                    </article>
-                  ))}
-                  {protectionWatchlist.slice(0, 3).map((item) => (
-                    <article key={`watch-${item.symbol}`} className="focus-card">
-                      <div className="focus-head"><strong>{item.name}</strong><Badge tone="red">保护观察</Badge></div>
-                      <p>{item.headline}</p>
-                      <div className="subline">{item.summary}</div>
-                    </article>
-                  ))}
-                  {!protectiveSellCandidate && !exitCandidates.length && !protectionWatchlist.length ? <div className="subline">该轮没有明显卖出 / 保护链路信号</div> : null}
-                </div>
-              </Card>
-            </div>
-
-            <div className="page-grid two-col">
-              <Card>
-                <SectionHeader title="该轮预警快照" subtitle="复盘这轮到底是哪些预警在推着系统动" />
-                <AlertFeed alerts={(alertLayer?.alerts || []).slice(0, 6)} emptyText="该轮没有高优先级预警" />
-              </Card>
-              <Card>
-                <SectionHeader title="LLM 复核详情" subtitle="看模型是批准、否决，还是只是补充解释" />
-                <div className="kv-list compact">
-                  <div><span>是否启用</span><strong>{llmReview?.enabled ? '是' : '否'}</strong></div>
-                  <div><span>模型动作</span><strong>{mapLabel('action', llmReview?.action, llmReview?.action || '未知')}</strong></div>
-                  <div><span>复核结论</span><strong>{llmReview?.reason || '暂无'}</strong></div>
-                  <div><span>信息面总结</span><strong>{llmReview?.raw?.news_view || '暂无'}</strong></div>
-                  <div><span>风险提示</span><strong>{llmReview?.raw?.risk_note || '暂无'}</strong></div>
-                </div>
-              </Card>
-            </div>
-          </div>
-        ) : null}
+      <Card className="history-post-card">
+        <SectionHeader title="最新分析帖正文" subtitle="正文单独整行展示，长文本不再塞进窄列里。" />
+        <pre className="console-block history-post-block">{vm.latestPostContent || '暂无正文'}</pre>
       </Card>
 
-      <div className="page-grid three-col">
-        <Card>
-          <SectionHeader title="最近预警" subtitle="保留最新一轮预警快照，便于复盘" />
-          <AlertFeed alerts={(vm.alertLayer?.alerts || []).slice(0, 6)} emptyText="当前没有预警快照" />
-        </Card>
-        <Card>
-          <SectionHeader title="最新日志尾部" subtitle="适合快速排查问题" />
-          <pre className="console-block">{vm.latestLogPreview || '暂无日志'}</pre>
-        </Card>
-        <Card>
-          <SectionHeader title="最新分析帖正文" subtitle="用于复核对外输出是否一致" />
-          <pre className="console-block">{vm.latestPostContent || '暂无正文'}</pre>
-        </Card>
-      </div>
+      <AuditExplainModal
+        open={explainOpen}
+        onClose={() => setExplainOpen(false)}
+        selectedAuditName={selectedAuditName}
+        selectedAudit={selectedAudit}
+        auditLoading={auditLoading}
+        auditError={auditError}
+        ruleProposal={ruleProposal}
+        finalDecision={finalDecision}
+        llmReview={llmReview}
+        scoredCandidates={scoredCandidates}
+        exitCandidates={exitCandidates}
+        alertLayer={alertLayer}
+        protectiveSellCandidate={protectiveSellCandidate}
+        protectionWatchlist={protectionWatchlist}
+        strategySignal={strategySignal}
+        dynamicFocus={dynamicFocus}
+        baseBundle={baseBundle}
+        execution={execution}
+        focusSymbol={focusSymbol}
+      />
     </div>
   )
 }
@@ -1857,7 +2560,6 @@ function App() {
     pageData,
     shellData,
     configData,
-    loading,
     pageLoading,
     configLoading,
     saving,
@@ -1918,9 +2620,20 @@ function App() {
     }
   }, [activeTab])
 
-  if (loading && !shellData) return <div className="screen-state">正在加载 dashboard...</div>
+  const shellFallbackVm = {
+    summary: {
+      configuredProfile: 'dividend-defense-v1',
+      lastRunProfile: null,
+      strategyState: 'maintain',
+      suggestedProfile: null,
+      asOf: null,
+      lastRunAt: null,
+    },
+    links: {},
+    completedFeatures: [],
+  }
 
-  const shellVm = shellData || pageData
+  const shellVm = shellData || pageData || shellFallbackVm
   if (!shellVm) return <div className="screen-state error-state">加载失败：{error || '未知错误'}</div>
 
   const renderPage = () => {
